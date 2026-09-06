@@ -7,6 +7,10 @@ plugin_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 unit_dir="$HOME/.config/systemd/user"
 unit_name="kdm-tablet-displayd.service"
 
+# shellcheck source=lib-deps.sh
+source "$plugin_dir/scripts/lib-deps.sh"
+tablet_display_ensure_wayvnc
+
 mkdir -p -- "$unit_dir"
 cp -- "$plugin_dir/systemd/$unit_name" "$unit_dir/$unit_name"
 

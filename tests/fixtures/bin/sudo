@@ -1,0 +1,6 @@
+#!/bin/bash
+# Fake `sudo` for tests: runs the given command directly, no privilege
+# escalation or auth prompt -- resolves against the fixtures PATH just like
+# a real shell would, so a faked target (pacman, ufw, ...) is what actually
+# runs. Never touches the real system.
+exec "$@"

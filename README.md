@@ -33,10 +33,17 @@ toggle, scan a QR code, connect. No manual Hyprland config, no running
 omarchy plugin add https://github.com/Kyotroo/omarchy-tablet-display.git --enable
 ```
 
-The installer detects `ufw` if present, works out your LAN subnet from the
-system's own default route, and adds a scoped allow rule for the setup page
-and VNC ports (LAN only, never the whole internet) — the single most common
-reason this kind of thing silently fails to connect. See
+The installer also installs [`wayvnc`](https://github.com/any1/wayvnc) via
+`pacman` if it isn't already on your system — it isn't part of a base
+Omarchy install, and the daemon does the actual screen-sharing through it.
+If `sudo` can't run non-interactively in your setup, it prints the exact
+command to run yourself (`sudo pacman -S wayvnc`) instead of failing
+silently.
+
+The installer also detects `ufw` if present, works out your LAN subnet from
+the system's own default route, and adds a scoped allow rule for the setup
+page and VNC ports (LAN only, never the whole internet) — the single most
+common reason this kind of thing silently fails to connect. See
 [Firewall](#firewall) below if you use a different firewall.
 
 ## Quick start
