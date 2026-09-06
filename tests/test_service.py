@@ -171,6 +171,19 @@ class ServiceTestCase(unittest.TestCase):
         with self.assertRaises(ServiceError):
             svc.set_resolution(1280, 720)
 
+    def test_get_qr_requires_running_state(self):
+        svc = self.make_service()
+        with self.assertRaises(ServiceError):
+            svc.get_qr_png_base64()
+
+    def test_get_qr_returns_base64_of_setup_server_png(self):
+        import base64
+        svc = self.make_service()
+        svc.start()
+        encoded = svc.get_qr_png_base64()
+        decoded = base64.b64decode(encoded)
+        self.assertTrue(decoded.startswith(b"\x89PNG"))
+
     # -- crash / recovery ----------------------------------------------------
 
     def test_wayvnc_respawns_after_unexpected_exit(self):

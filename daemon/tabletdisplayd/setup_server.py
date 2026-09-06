@@ -96,10 +96,15 @@ class SetupServer:
         self._logf = logf or (lambda *a, **k: None)
         self._server: _ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
+        self.qr_png_bytes: bytes = b""
 
     @property
     def url(self) -> str:
         return f"http://{self.bind_ip}:{self.port}/setup"
+
+    @property
+    def qr_url(self) -> str:
+        return f"http://{self.bind_ip}:{self.port}/qr.png"
 
     def start(self) -> None:
         # The page has no template engine of its own; the wayvnc port is
@@ -109,6 +114,7 @@ class SetupServer:
         page_text = page_text.replace("__VNC_PORT__", str(self.vnc_port))
         page_bytes = page_text.encode("utf-8")
         qr_png = qrcode_gen.generate_png(self.url)
+        self.qr_png_bytes = qr_png
 
         self._server = _ThreadingHTTPServer((self.bind_ip, self.port), _Handler)
         self._server.tabletdisplay_page = page_bytes

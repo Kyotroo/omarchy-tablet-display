@@ -9,6 +9,7 @@ clients would add complexity without buying responsiveness.
 
 from __future__ import annotations
 
+import base64
 import json
 import threading
 import time
@@ -134,6 +135,7 @@ class Service:
             "vnc_port": self.vnc_port,
             "setup_port": self.setup_port,
             "setup_url": self._setup_server.url if self._setup_server else None,
+            "qr_url": self._setup_server.qr_url if self._setup_server else None,
             "width": self.width,
             "height": self.height,
             "refresh": self.refresh,
@@ -249,6 +251,21 @@ class Service:
             self.last_error = None
             self._notify()
             return self._status_locked()
+
+    def get_qr_png_base64(self) -> str:
+        """Base64 PNG for the panel's QR image.
+
+        Delivered over the same Unix socket as everything else rather than
+        as an http:// Image source: nothing else in this shell loads an
+        Image from a network URL, and testing confirmed QtQuick's Image
+        element never resolves one here (stays in Loading forever, no
+        error) -- Quickshell's plugin QML has no wired-up network image
+        loader. A data: URI needs no network stack at all.
+        """
+        with self._lock:
+            if self.state != STATE_RUNNING or self._setup_server is None:
+                raise ServiceError("cannot fetch QR code while not running")
+            return base64.b64encode(self._setup_server.qr_png_bytes).decode("ascii")
 
     def set_resolution(self, width, height, refresh=None, scale=None) -> dict:
         with self._lock:

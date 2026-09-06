@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "kdm.tablet-display",
+  "name": "Tablet Display",
+  "version": "0.1.0",
+  "author": "kdm",
+  "license": "MIT",
+  "description": "Turn a tablet into a wireless second monitor over WiFi: click the bar toggle, scan a QR code, connect.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Tablet Display",
+    "description": "Toggle a wireless second monitor for a tablet on the LAN.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

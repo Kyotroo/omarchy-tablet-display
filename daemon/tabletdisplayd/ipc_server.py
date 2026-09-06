@@ -25,7 +25,13 @@ class _Handler(socketserver.StreamRequestHandler):
         subscribed = False
         try:
             while True:
-                line = self.rfile.readline()
+                try:
+                    line = self.rfile.readline()
+                except (ConnectionResetError, BrokenPipeError, OSError):
+                    # A client going away mid-read (QML plugin reload, daemon
+                    # restart racing a live connection) is routine, not a
+                    # server fault -- treat it the same as a clean close.
+                    break
                 if not line:
                     break
                 try:
@@ -36,7 +42,10 @@ class _Handler(socketserver.StreamRequestHandler):
                 if subscribe_requested:
                     subscribed = True
                     server.add_subscriber(self.wfile, self.wfile_lock)
-                self._write(response)
+                try:
+                    self._write(response)
+                except (ConnectionResetError, BrokenPipeError, OSError):
+                    break
         finally:
             if subscribed:
                 server.remove_subscriber(self.wfile)
@@ -151,6 +160,8 @@ class IPCServer:
                 )
             elif method == protocol.METHOD_STOP:
                 result = self.service.stop()
+            elif method == protocol.METHOD_GET_QR:
+                result = {"png_base64": self.service.get_qr_png_base64()}
             elif method == protocol.METHOD_SET_RESOLUTION:
                 result = self.service.set_resolution(
                     width=params["width"],

@@ -14,6 +14,7 @@ METHOD_SUBSCRIBE = "subscribe"
 METHOD_START = "start"
 METHOD_STOP = "stop"
 METHOD_SET_RESOLUTION = "set_resolution"
+METHOD_GET_QR = "get_qr"
 
 EVENT_STATUS = "status"
 
@@ -23,6 +24,7 @@ KNOWN_METHODS = {
     METHOD_START,
     METHOD_STOP,
     METHOD_SET_RESOLUTION,
+    METHOD_GET_QR,
 }
 
 

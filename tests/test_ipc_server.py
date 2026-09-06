@@ -6,6 +6,7 @@ depends on.
 import json
 import os
 import socket
+import struct
 import sys
 import time
 import unittest
@@ -63,6 +64,10 @@ class DispatchTestCase(unittest.TestCase):
         self.assertTrue(subscribe)
         self.assertEqual(response["result"]["state"], "stopped")
 
+    def test_get_qr_while_stopped_is_invalid_state_error(self):
+        response, _ = self.server.dispatch(request(protocol.METHOD_GET_QR))
+        self.assertEqual(response["error"]["code"], "invalid_state")
+
     def test_set_resolution_missing_params_is_invalid_params_error(self):
         response, _ = self.server.dispatch(request(protocol.METHOD_SET_RESOLUTION, {}))
         self.assertEqual(response["error"]["code"], "invalid_params")
@@ -118,6 +123,26 @@ class SocketWireTestCase(unittest.TestCase):
             event = self._recv_line(sock)
             self.assertEqual(event["type"], "event")
             self.assertEqual(event["event"], protocol.EVENT_STATUS)
+
+    def test_abrupt_client_disconnect_does_not_take_down_the_server(self):
+        # A QML plugin hot-reload or a client machine dropping off mid-read
+        # resets the connection rather than closing it cleanly. SO_LINGER(0)
+        # forces the kernel to send an RST on close instead of a FIN, which
+        # is what surfaces as ConnectionResetError server-side.
+        rude = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        rude.connect(str(self.socket_path))
+        rude.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        rude.send(b'{"type": "request"')  # a deliberately incomplete line
+        rude.close()
+
+        time.sleep(0.2)  # let the server-side thread observe the reset
+
+        # The server must still be alive and answering other clients.
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.connect(str(self.socket_path))
+            self._send(sock, request(protocol.METHOD_STATUS))
+            response = self._recv_line(sock)
+        self.assertEqual(response["result"]["state"], "stopped")
 
     def test_multiple_clients_can_connect_concurrently(self):
         sockets = []
