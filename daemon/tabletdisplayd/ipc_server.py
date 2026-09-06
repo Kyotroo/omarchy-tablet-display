@@ -160,6 +160,10 @@ class IPCServer:
                 )
             elif method == protocol.METHOD_STOP:
                 result = self.service.stop()
+            elif method == protocol.METHOD_SET_POSITION:
+                result = self.service.set_position(params["position"])
+            elif method == protocol.METHOD_SET_DISPLAY_MODE:
+                result = self.service.set_display_mode(params["mode"])
             elif method == protocol.METHOD_GET_QR:
                 result = {"png_base64": self.service.get_qr_png_base64()}
             elif method == protocol.METHOD_SET_RESOLUTION:

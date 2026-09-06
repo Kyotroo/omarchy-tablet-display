@@ -14,3 +14,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now "$unit_name"
 
 echo "kdm-tablet-displayd installed and started."
+
+# shellcheck source=lib-firewall.sh
+source "$plugin_dir/scripts/lib-firewall.sh"
+tablet_display_firewall_allow

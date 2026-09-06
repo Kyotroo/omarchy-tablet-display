@@ -33,7 +33,8 @@ class ServiceTestCase(unittest.TestCase):
 
         self.hypr_state_path = self.tmp / "hypr-state.json"
         self.hypr_state_path.write_text(json.dumps({
-            "monitors": [{"name": "eDP-1", "width": 2880, "height": 1800, "refreshRate": 120.0}],
+            "monitors": [{"name": "eDP-1", "width": 2880, "height": 1800, "refreshRate": 120.0,
+                          "focused": True}],
             "next_headless": 1,
         }))
         os.environ["FAKE_HYPR_STATE"] = str(self.hypr_state_path)
@@ -164,7 +165,8 @@ class ServiceTestCase(unittest.TestCase):
 
         self.assertEqual(status["state"], STATE_ERROR)
         self.assertEqual(self.hypr_state()["monitors"],
-                          [{"name": "eDP-1", "width": 2880, "height": 1800, "refreshRate": 120.0}])
+                          [{"name": "eDP-1", "width": 2880, "height": 1800, "refreshRate": 120.0,
+                            "focused": True}])
 
     def test_set_resolution_requires_running_state(self):
         svc = self.make_service()
@@ -183,6 +185,142 @@ class ServiceTestCase(unittest.TestCase):
         encoded = svc.get_qr_png_base64()
         decoded = base64.b64decode(encoded)
         self.assertTrue(decoded.startswith(b"\x89PNG"))
+
+    # -- position preference -------------------------------------------------
+
+    def test_position_defaults_and_persists_across_stop_start(self):
+        svc = self.make_service()
+        self.assertEqual(svc.position, "auto-right")
+
+        svc.set_position("auto-left")
+        svc.start()
+        svc.stop()
+        self.assertEqual(svc.position, "auto-left", "position must survive a stop, unlike width/height")
+
+        # A fresh Service (as a daemon restart constructs) picks up the
+        # persisted preference rather than resetting to the hardcoded default.
+        reloaded = self.make_service()
+        self.assertEqual(reloaded.position, "auto-left")
+
+    def test_set_position_rejects_invalid_value(self):
+        svc = self.make_service()
+        with self.assertRaises(ServiceError):
+            svc.set_position("sideways")
+
+    def test_set_position_while_running_reapplies_immediately(self):
+        svc = self.make_service()
+        svc.start()
+        svc.set_position("auto-up")
+        monitor = next(m for m in self.hypr_state()["monitors"] if m["name"] == "HEADLESS-1")
+        self.assertEqual(monitor["position"], "auto-up")
+
+    def test_set_position_while_stopped_only_persists(self):
+        svc = self.make_service()
+        svc.set_position("auto-down")
+        self.assertEqual(svc.status()["position"], "auto-down")
+        self.assertEqual(self.log_lines(), [], "no hyprctl calls while stopped")
+
+    # -- display mode: extend vs mirror ---------------------------------------
+
+    def test_default_display_mode_is_extend(self):
+        svc = self.make_service()
+        status = svc.start()
+        self.assertEqual(status["display_mode"], "extend")
+        self.assertIsNone(status["mirror_source"])
+        monitor = next(m for m in self.hypr_state()["monitors"] if m["name"] == "HEADLESS-1")
+        self.assertIsNone(monitor.get("mirrorOf"))
+
+    def test_start_in_mirror_mode_mirrors_the_focused_monitor(self):
+        svc = self.make_service()
+        svc.set_display_mode("mirror")
+        status = svc.start()
+
+        self.assertEqual(status["state"], STATE_RUNNING)
+        self.assertEqual(status["mirror_source"], "eDP-1")
+        # Hyprland forces the mirrored output to the source's own
+        # resolution -- confirmed live -- not whatever default width/height
+        # this daemon would otherwise have asked for.
+        self.assertEqual((status["width"], status["height"]), (2880, 1800))
+        monitor = next(m for m in self.hypr_state()["monitors"] if m["name"] == "HEADLESS-1")
+        self.assertEqual(monitor["mirrorOf"], "eDP-1")
+
+    def test_mirror_mode_persists_and_applies_on_next_start(self):
+        svc = self.make_service()
+        svc.set_position("auto-left")  # a stopped no-op reapply, sets a baseline
+        svc.set_display_mode("mirror")
+        svc.stop()
+
+        reloaded = self.make_service()
+        self.assertEqual(reloaded.display_mode, "mirror")
+        status = reloaded.start()
+        self.assertEqual(status["mirror_source"], "eDP-1")
+
+    def test_switching_to_mirror_while_running_reapplies_immediately(self):
+        svc = self.make_service()
+        svc.start()
+        status = svc.set_display_mode("mirror")
+        self.assertEqual(status["mirror_source"], "eDP-1")
+        monitor = next(m for m in self.hypr_state()["monitors"] if m["name"] == "HEADLESS-1")
+        self.assertEqual(monitor["mirrorOf"], "eDP-1")
+
+    def test_switching_back_to_extend_clears_the_mirror(self):
+        svc = self.make_service()
+        svc.set_display_mode("mirror")
+        svc.start()
+        svc.set_display_mode("extend")
+
+        status = svc.status()
+        self.assertEqual(status["display_mode"], "extend")
+        self.assertIsNone(status["mirror_source"])
+        monitor = next(m for m in self.hypr_state()["monitors"] if m["name"] == "HEADLESS-1")
+        self.assertIsNone(monitor.get("mirrorOf"), "mirror=\"none\" must be sent explicitly, not omitted")
+
+    def test_set_display_mode_rejects_invalid_value(self):
+        svc = self.make_service()
+        with self.assertRaises(ServiceError):
+            svc.set_display_mode("triplicate")
+
+    def test_start_in_mirror_mode_fails_cleanly_with_no_focused_monitor(self):
+        # e.g. every real monitor is asleep/unfocused when start() runs.
+        state = self.hypr_state()
+        state["monitors"][0]["focused"] = False
+        self.hypr_state_path.write_text(json.dumps(state))
+
+        svc = self.make_service()
+        svc.set_display_mode("mirror")
+        status = svc.start()
+
+        self.assertEqual(status["state"], STATE_ERROR)
+        self.assertIsNotNone(status["last_error"])
+        # No orphaned headless output left behind by the failed attempt.
+        self.assertEqual(self.hypr_state()["monitors"], state["monitors"])
+
+    def test_set_resolution_rejected_while_mirroring(self):
+        svc = self.make_service()
+        svc.set_display_mode("mirror")
+        svc.start()
+        with self.assertRaises(ServiceError):
+            svc.set_resolution(1280, 720)
+
+    def test_client_report_is_a_noop_while_mirroring(self):
+        svc = self.make_service()
+        svc.set_display_mode("mirror")
+        svc.start()
+        svc._handle_client_report(1280, 800, 2.0)  # must not raise
+        # Resolution stays whatever the mirror forced, not the reported size.
+        self.assertEqual((svc.width, svc.height), (2880, 1800))
+
+    def test_set_position_while_mirroring_only_persists(self):
+        svc = self.make_service()
+        svc.set_display_mode("mirror")
+        svc.start()
+        self.hypr_state_path.write_text(json.dumps(self.hypr_state()))  # snapshot
+        before = self.hypr_state()
+
+        svc.set_position("auto-up")
+
+        self.assertEqual(svc.position, "auto-up")
+        self.assertEqual(self.hypr_state(), before, "must not touch hyprctl (would break the mirror)")
 
     # -- crash / recovery ----------------------------------------------------
 

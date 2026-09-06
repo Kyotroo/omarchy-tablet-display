@@ -5,6 +5,8 @@
     tablet-display-ctl start [width height [refresh]]
     tablet-display-ctl stop
     tablet-display-ctl set-resolution width height [refresh]
+    tablet-display-ctl set-position auto-left|auto-right|auto-up|auto-down
+    tablet-display-ctl get-qr
 
 Exists for manual verification and as a debugging tool; the QML panel is the
 real client and speaks the same protocol directly over Quickshell's Socket
@@ -21,6 +23,8 @@ METHOD_ALIASES = {
     "start": "start",
     "stop": "stop",
     "set-resolution": "set_resolution",
+    "set-position": "set_position",
+    "get-qr": "get_qr",
 }
 
 
@@ -51,6 +55,10 @@ def main(argv):
         params["height"] = int(argv[2])
         if len(argv) > 3:
             params["refresh"] = float(argv[3])
+    elif method == "set_position":
+        if len(argv) < 2:
+            sys.exit("set-position needs a position (auto-left|auto-right|auto-up|auto-down)")
+        params["position"] = argv[1]
 
     request = {
         "type": "request",

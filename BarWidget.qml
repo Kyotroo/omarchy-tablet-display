@@ -18,7 +18,8 @@ BarWidget {
   readonly property var offlineStatus: ({
     state: "stopped", output_name: null, bind_ip: null, vnc_port: null,
     setup_port: null, setup_url: null, qr_url: null, width: null,
-    height: null, refresh: null, scale: null, client_connected: false,
+    height: null, refresh: null, scale: null, position: "auto-right",
+    display_mode: "extend", mirror_source: null, client_connected: false,
     last_error: null,
   })
   property var status: offlineStatus
@@ -70,17 +71,9 @@ BarWidget {
   function setResolution(width, height, refresh) {
     _send("set_resolution", { width: width, height: height, refresh: refresh })
   }
+  function setPosition(position) { _send("set_position", { position: position }) }
+  function setDisplayMode(mode) { _send("set_display_mode", { mode: mode }) }
   function requestQr() { _send("get_qr", {}) }
-
-  // Single click both flips the session and opens the panel, matching the
-  // "click to start" / "click to stop" behavior asked for directly on the
-  // bar icon; the panel's own Start/Stop button covers acting again without
-  // closing and re-clicking the (small) bar icon.
-  function toggleSession() {
-    if (root.running) root.stop()
-    else root.start()
-    root.open()
-  }
 
   function _applyStatus(newStatus) {
     root.status = newStatus
@@ -209,7 +202,7 @@ BarWidget {
   IpcHandler {
     target: "kdm.tablet-display"
 
-    function toggle(): void { root.toggleSession() }
+    function toggle(): void { root.togglePanel() }
     function start(): string { root.start(); return "queued" }
     function stop(): string { root.stop(); return "queued" }
     function status(): string { return JSON.stringify(root.status) }
@@ -229,7 +222,7 @@ BarWidget {
     tooltipText: root._tooltipText()
     onPressed: function(mouseButton) {
       if (mouseButton === Qt.MiddleButton) root.refreshStatus()
-      else root.toggleSession()
+      else root.togglePanel()
     }
   }
 }

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import http.server
 import json
+import sys
 import threading
 
 from . import qrcode_gen
@@ -27,6 +28,10 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path in ("/setup", "/setup/"):
+            self.server.tabletdisplay_logf(
+                "setup-http: GET /setup from %s, User-Agent: %s",
+                self.client_address[0], self.headers.get("User-Agent", "(none)"),
+            )
             self._send(200, "text/html; charset=utf-8", self.server.tabletdisplay_page)
         elif self.path == "/qr.png":
             self._send(200, "image/png", self.server.tabletdisplay_qr_png)
@@ -84,6 +89,16 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 class _ThreadingHTTPServer(http.server.ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    def handle_error(self, request, client_address):
+        # A mobile browser aborting a connection mid-request (backgrounded,
+        # navigated away, or just an early QR-scanner preview fetch) resets
+        # the socket -- routine, not a server fault. Anything else still
+        # gets the normal traceback.
+        exc_type = sys.exc_info()[0]
+        if exc_type in (ConnectionResetError, BrokenPipeError):
+            return
+        super().handle_error(request, client_address)
 
 
 class SetupServer:

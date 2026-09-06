@@ -22,4 +22,6 @@ export TEST_TMP_DIR="$test_tmp"
 export PATH="$repo_dir/tests/fixtures/bin:$PATH"
 
 cd "$repo_dir"
+bash tests/test_firewall.sh
+node tests/test_setup_page_detect.mjs
 python3 -m unittest discover -s tests -p 'test_*.py' -v

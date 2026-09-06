@@ -89,7 +89,7 @@ def remove_output(name: str) -> None:
 
 
 def set_monitor_mode(name: str, width: int, height: int, refresh: float | None = None,
-                      scale: float = 1.0) -> None:
+                      scale: float = 1.0, position: str = "auto") -> None:
     """Apply a resolution (and scale) to an existing output via hl.monitor.
 
     `hyprctl keyword monitor ...` is rejected by this compositor's Lua-based
@@ -109,7 +109,49 @@ def set_monitor_mode(name: str, width: int, height: int, refresh: float | None =
     if refresh:
         mode = f"{mode}@{refresh:g}"
     lua = (
-        "hl.monitor({output=%s, mode=%s, position=\"auto\", scale=%s})"
-        % (json.dumps(name), json.dumps(mode), json.dumps(round(scale, 3)))
+        "hl.monitor({output=%s, mode=%s, position=%s, scale=%s, mirror=\"none\"})"
+        % (json.dumps(name), json.dumps(mode), json.dumps(position), json.dumps(round(scale, 3)))
     )
     _run(["eval", lua])
+
+
+def set_monitor_mirror(name: str, source: str, width: int, height: int,
+                        refresh: float | None = None) -> None:
+    """Mirror `source` onto `name` via hl.monitor's `mirror` field.
+
+    `width`/`height` must be the source's own current mode, passed
+    explicitly alongside `mirror` in the same call. Confirmed live this is
+    required: `mirror` alone (omitting `mode`) leaves the target at
+    whatever mode it already had -- e.g. a fresh headless output's default
+    1920x1080 -- instead of the source's actual resolution, even though
+    `mirrorOf` correctly reports the mirror is active either way. Only
+    passing both together produces a true full-resolution mirror.
+
+    Confirmed live: passing `mirror` at all makes it sticky -- a later
+    hl.monitor call that omits the field entirely does NOT clear a mirror
+    already in effect, it just leaves it as-is. `set_monitor_mode` above
+    always passes `mirror="none"` explicitly for exactly this reason: it is
+    the only way back to independent (extend) mode once mirroring has been
+    set, not merely "not asking for mirroring".
+    """
+    mode = f"{width}x{height}"
+    if refresh:
+        mode = f"{mode}@{refresh:g}"
+    lua = (
+        "hl.monitor({output=%s, mode=%s, mirror=%s})"
+        % (json.dumps(name), json.dumps(mode), json.dumps(source))
+    )
+    _run(["eval", lua])
+
+
+def focused_monitor_name() -> str | None:
+    """The monitor Hyprland currently considers focused, or None if none is.
+
+    Used to pick a mirror source: "the screen you're looking at" is a more
+    sensible default than guessing which connector is "the real" one on a
+    machine that might have several physical monitors.
+    """
+    for monitor in monitors():
+        if monitor.get("focused"):
+            return monitor["name"]
+    return None

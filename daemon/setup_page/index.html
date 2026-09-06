@@ -39,26 +39,41 @@
   .status-line { font-size: 0.92rem; color: var(--muted); margin: 0 0 14px; }
   .status-line.ok { color: #7fd88f; }
   .status-line.fail { color: #e88a8a; }
-  button.primary {
+  .step { margin-top: 18px; }
+  .step:first-of-type { margin-top: 0; }
+  .step-label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    font-weight: 600;
+    margin: 0 0 8px;
+  }
+  a.button, button.primary {
+    display: block;
     width: 100%;
+    box-sizing: border-box;
     padding: 14px 16px;
     font-size: 1.05rem;
     font-weight: 600;
-    border: none;
     border-radius: 10px;
+    cursor: pointer;
+    text-align: center;
+    text-decoration: none;
+  }
+  button.primary {
+    border: none;
     background: var(--accent);
     color: var(--accent-text);
-    cursor: pointer;
   }
   button.primary:active { opacity: 0.85; }
-  .secondary-link {
-    display: block;
-    text-align: center;
-    margin-top: 14px;
+  a.button {
+    border: 1px solid var(--accent);
+    background: transparent;
     color: var(--accent);
-    text-decoration: none;
-    font-size: 0.92rem;
   }
+  a.button:active { opacity: 0.7; }
+  #storeLinks a.button + a.button { margin-top: 8px; }
   .manual {
     margin-top: 22px;
     padding-top: 18px;
@@ -87,8 +102,15 @@
   <div class="card">
     <p class="status-line" id="reportStatus">Reading your screen&hellip;</p>
 
-    <button class="primary" id="connectButton" hidden>Open in VNC Viewer</button>
-    <a class="secondary-link" id="storeLink" href="#" hidden target="_blank" rel="noopener"></a>
+    <div class="step" id="storeStep" hidden>
+      <p class="step-label" id="storeStepLabel">1. Get the app (skip if already installed)</p>
+      <div id="storeLinks"></div>
+    </div>
+
+    <div class="step">
+      <p class="step-label" id="connectLabel">Connect</p>
+      <button class="primary" id="connectButton" hidden>Open in VNC Viewer</button>
+    </div>
 
     <div class="manual">
       <h2>Manual entry</h2>
@@ -109,7 +131,10 @@
 
   var statusEl = document.getElementById("reportStatus");
   var connectButton = document.getElementById("connectButton");
-  var storeLink = document.getElementById("storeLink");
+  var connectLabel = document.getElementById("connectLabel");
+  var storeStep = document.getElementById("storeStep");
+  var storeStepLabel = document.getElementById("storeStepLabel");
+  var storeLinks = document.getElementById("storeLinks");
   var manualAddress = document.getElementById("manualAddress");
 
   // The server that served this page is the only address a same-origin
@@ -117,6 +142,20 @@
   var host = location.hostname;
 
   function detectPlatform() {
+    // Checked first and confirmed necessary live: on a real Galaxy Tab S10
+    // FE, Chrome's legacy navigator.userAgent read as a full desktop Linux
+    // string ("X11; Linux x86_64" ... no "Android" anywhere) -- large-screen
+    // Android tablets can get Chrome's desktop-site UA by default. The
+    // User-Agent Client Hints API reports the true platform separately from
+    // that legacy string and is not affected by the same desktop-site
+    // substitution, so it is checked first wherever the browser supports it.
+    if (navigator.userAgentData && navigator.userAgentData.platform) {
+      var chPlatform = navigator.userAgentData.platform;
+      if (/Android/i.test(chPlatform)) return "android";
+      if (/iOS/i.test(chPlatform)) return "ios";
+      if (/Windows/i.test(chPlatform)) return "windows";
+    }
+
     var ua = navigator.userAgent || "";
     var isIPadOS13Plus = navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
     if (/Android/i.test(ua)) return "android";
@@ -125,12 +164,22 @@
     return "other";
   }
 
+  var ALL_STORES = [
+    { url: REALVNC_ANDROID, label: "Get RealVNC Viewer on Google Play" },
+    { url: REALVNC_IOS, label: "Get RealVNC Viewer on the App Store" },
+    { url: REALVNC_WINDOWS, label: "Download RealVNC Viewer for Windows" }
+  ];
+
   function storeInfoFor(platform) {
     switch (platform) {
-      case "android": return { url: REALVNC_ANDROID, label: "Get RealVNC Viewer on Google Play" };
-      case "ios": return { url: REALVNC_IOS, label: "Get RealVNC Viewer on the App Store" };
-      case "windows": return { url: REALVNC_WINDOWS, label: "Download RealVNC Viewer for Windows" };
-      default: return null;
+      case "android": return [ALL_STORES[0]];
+      case "ios": return [ALL_STORES[1]];
+      case "windows": return [ALL_STORES[2]];
+      // Detection is a best-effort signal, not a hard dependency (Chrome's
+      // desktop-site UA on tablets defeats it outright -- confirmed live).
+      // Showing every option rather than hiding this step keeps the feature
+      // working even when detection is wrong, at the cost of one extra tap.
+      default: return ALL_STORES;
     }
   }
 
@@ -159,43 +208,38 @@
     return host + ":" + VNC_PORT;
   }
 
-  function attemptOpenThenFallback(vncUri, fallback) {
-    var fallbackFired = false;
-    var timer = null;
-
-    function cancelFallback() {
-      if (timer !== null) { clearTimeout(timer); timer = null; }
-      document.removeEventListener("visibilitychange", onHide);
-    }
-    function onHide() {
-      if (document.hidden) cancelFallback();
-    }
-
-    document.addEventListener("visibilitychange", onHide);
-    timer = setTimeout(function () {
-      if (!fallbackFired && !document.hidden) {
-        fallbackFired = true;
-        if (fallback) window.location.href = fallback;
-      }
-    }, 1500);
-
-    window.location.href = vncUri;
-  }
-
   var platform = detectPlatform();
   var address = vncAddress();
   manualAddress.textContent = address;
 
-  var store = storeInfoFor(platform);
-  if (store) {
-    storeLink.href = store.url;
-    storeLink.textContent = store.label;
-    storeLink.hidden = false;
+  // Whether tapping "Open in VNC Viewer" actually launched an app cannot be
+  // detected reliably: on Android, navigating to an unregistered vnc://
+  // link can pop the OS "complete action using" chooser, which toggles page
+  // visibility the same way a real app switch would even if the user then
+  // cancels it with nothing installed. A timeout-based fallback keyed off
+  // that signal was tried first and confirmed to silently do nothing in
+  // exactly that case. So the store link is not a fallback at all here --
+  // it is always shown as its own equally-weighted first step, independent
+  // of whatever the vnc:// attempt does.
+  var stores = storeInfoFor(platform);
+  stores.forEach(function (store) {
+    var link = document.createElement("a");
+    link.className = "button";
+    link.href = store.url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = store.label;
+    storeLinks.appendChild(link);
+  });
+  if (stores.length > 1) {
+    storeStepLabel.textContent = "1. Get the app (not sure which? pick the one matching this device)";
   }
+  storeStep.hidden = false;
+  connectLabel.textContent = "2. Connect";
 
   connectButton.hidden = false;
   connectButton.addEventListener("click", function () {
-    attemptOpenThenFallback("vnc://" + address, store ? store.url : null);
+    window.location.href = "vnc://" + address;
   });
 
   reportDisplay().then(function (payload) {

@@ -12,6 +12,23 @@ def main(argv):
             return 2
         print(f"1.1.1.1 via 192.0.2.1 dev eth0 src {addr} uid 1000")
         return 0
+
+    # Supports the two forms lib-firewall.sh's tablet_display_lan_subnet uses.
+    if argv[:4] == ["-4", "route", "show", "default"]:
+        dev = os.environ.get("FAKE_DEFAULT_DEV")
+        if not dev:
+            return 0  # no default route: empty output, like a disconnected host
+        print(f"default via 192.168.1.1 dev {dev} proto dhcp metric 600")
+        return 0
+
+    if argv[:3] == ["-4", "route", "show"] and "dev" in argv and "scope" in argv:
+        dev = argv[argv.index("dev") + 1]
+        expected_dev = os.environ.get("FAKE_DEFAULT_DEV")
+        subnet = os.environ.get("FAKE_LAN_SUBNET")
+        if dev == expected_dev and subnet:
+            print(f"{subnet} dev {dev} proto kernel scope link src 10.0.0.5")
+        return 0
+
     print(f"fake ip: unhandled command {argv}", file=sys.stderr)
     return 1
 

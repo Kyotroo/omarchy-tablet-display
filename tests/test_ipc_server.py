@@ -68,6 +68,15 @@ class DispatchTestCase(unittest.TestCase):
         response, _ = self.server.dispatch(request(protocol.METHOD_GET_QR))
         self.assertEqual(response["error"]["code"], "invalid_state")
 
+    def test_set_position_missing_params_is_invalid_params_error(self):
+        response, _ = self.server.dispatch(request(protocol.METHOD_SET_POSITION, {}))
+        self.assertEqual(response["error"]["code"], "invalid_params")
+
+    def test_set_position_valid_value_while_stopped_succeeds(self):
+        response, _ = self.server.dispatch(request(protocol.METHOD_SET_POSITION, {"position": "auto-up"}))
+        self.assertNotIn("error", response)
+        self.assertEqual(response["result"]["position"], "auto-up")
+
     def test_set_resolution_missing_params_is_invalid_params_error(self):
         response, _ = self.server.dispatch(request(protocol.METHOD_SET_RESOLUTION, {}))
         self.assertEqual(response["error"]["code"], "invalid_params")

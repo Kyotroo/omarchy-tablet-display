@@ -14,11 +14,14 @@ Panel {
 
   readonly property var status: hostWidget ? hostWidget.status : ({
     state: "stopped", bind_ip: null, vnc_port: null, setup_url: null,
-    qr_url: null, width: null, height: null, client_connected: false, last_error: null,
+    qr_url: null, width: null, height: null, position: "auto-right",
+    display_mode: "extend", mirror_source: null,
+    client_connected: false, last_error: null,
   })
   readonly property bool daemonReachable: hostWidget ? hostWidget.daemonReachable : false
   readonly property bool running: status.state === "running"
   readonly property bool hasError: status.state === "error"
+  readonly property bool mirroring: status.display_mode === "mirror"
 
   readonly property color foreground: root.bar ? root.bar.foreground : Color.foreground
   readonly property color background: root.bar ? root.bar.background : Color.background
@@ -38,6 +41,21 @@ Panel {
       opts.push({ value: presets[i].id, label: presets[i].label })
     return opts
   }
+
+  readonly property var positionOptions: [
+    { value: "auto-right", label: "Right of main screen" },
+    { value: "auto-left", label: "Left of main screen" },
+    { value: "auto-up", label: "Above main screen" },
+    { value: "auto-down", label: "Below main screen" },
+  ]
+
+  // "Extend" is Hyprland's only non-mirrored multi-monitor mode -- every
+  // output, physical or virtual, already gets its own independent
+  // workspace, so there is no separate "own workspaces" mode beyond this.
+  readonly property var displayModeOptions: [
+    { value: "extend", label: "Extend (own workspace)" },
+    { value: "mirror", label: "Duplicate main screen" },
+  ]
 
   function open() { controller.show() }
   function close() { controller.hide() }
@@ -63,6 +81,8 @@ Panel {
 
   function resolutionLine() {
     if (!running || !status.width) return ""
+    if (root.mirroring) return "Duplicating " + (status.mirror_source || "main screen") +
+      " — " + status.width + "×" + status.height
     return status.width + "×" + status.height +
       (status.scale && status.scale !== 1 ? " (scale " + status.scale + ")" : "")
   }
@@ -242,6 +262,7 @@ Panel {
         }
 
         Dropdown {
+          visible: !root.mirroring
           width: parent.width
           label: "Resolution preset (overrides auto-detect)"
           value: root.selectedPresetId
@@ -250,6 +271,33 @@ Panel {
           background: root.background
           onChanged: function(value) { root.applyPreset(value) }
         }
+      }
+
+      Dropdown {
+        width: parent.width
+        label: "Display mode"
+        value: root.status.display_mode || "extend"
+        options: root.displayModeOptions
+        foreground: root.foreground
+        background: root.background
+        // A standing preference, not tied to a running session: persists
+        // on the daemon side and applies immediately if already running,
+        // or takes effect on the next Start otherwise.
+        onChanged: function(value) { hostWidget.setDisplayMode(value) }
+      }
+
+      // Position and per-tablet resolution both mean nothing while
+      // duplicating another screen -- the mirrored output takes that
+      // screen's own position and resolution, not a chosen one.
+      Dropdown {
+        visible: !root.mirroring
+        width: parent.width
+        label: "Position relative to main screen"
+        value: root.status.position || "auto-right"
+        options: root.positionOptions
+        foreground: root.foreground
+        background: root.background
+        onChanged: function(value) { hostWidget.setPosition(value) }
       }
 
       Button {

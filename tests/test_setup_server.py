@@ -2,7 +2,10 @@
 and the report POST that feeds back into resolution reconfiguration."""
 import json
 import os
+import socket
+import struct
 import sys
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -57,6 +60,22 @@ class SetupServerTestCase(unittest.TestCase):
         self.assertEqual(res.status, 200)
         self.assertEqual(res.headers["Content-Type"], "image/png")
         self.assertTrue(body.startswith(b"\x89PNG"))
+
+    def test_abrupt_client_disconnect_does_not_take_down_the_server(self):
+        # A mobile browser backgrounding mid-request (or a QR-scanner app's
+        # preview fetch) resets the connection rather than closing it
+        # cleanly. SO_LINGER(0) forces the kernel to send an RST on close,
+        # which is what surfaces as ConnectionResetError server-side.
+        rude = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        rude.connect(("127.0.0.1", self.server.port))
+        rude.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+        rude.send(b"GET /setup HTTP/1.1\r\n")  # deliberately incomplete request
+        rude.close()
+
+        time.sleep(0.2)
+
+        with self.get("/qr.png") as res:
+            self.assertEqual(res.status, 200)
 
     def test_unknown_path_is_404(self):
         with self.assertRaises(urllib.error.HTTPError) as ctx:

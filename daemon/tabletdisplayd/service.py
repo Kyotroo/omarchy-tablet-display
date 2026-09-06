@@ -60,8 +60,33 @@ class Service:
         self._setup_server: SetupServer | None = None
         self._on_change = None
 
+        # Unlike width/height/refresh/scale (the live session's own numbers,
+        # meaningless once stopped), position and display_mode are standing
+        # user preferences: they survive stop/start and are loaded once here
+        # rather than reset to a hardcoded default every session.
+        settings = self._load_settings()
+        self.position = settings.get("position", config.DEFAULT_POSITION)
+        self.display_mode = settings.get("display_mode", config.DEFAULT_DISPLAY_MODE)
+        self.mirror_source = None
+
     def set_notifier(self, on_change) -> None:
         self._on_change = on_change
+
+    def _settings_file(self):
+        return self.state_dir / "settings.json"
+
+    def _load_settings(self) -> dict:
+        try:
+            return json.loads(self._settings_file().read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def _save_settings(self) -> None:
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self._settings_file().write_text(json.dumps({
+            "position": self.position,
+            "display_mode": self.display_mode,
+        }))
 
     def _session_file(self):
         return self.state_dir / "session.json"
@@ -140,6 +165,9 @@ class Service:
             "height": self.height,
             "refresh": self.refresh,
             "scale": self.scale,
+            "position": self.position,
+            "display_mode": self.display_mode,
+            "mirror_source": self.mirror_source,
             "client_connected": client_connected,
             "last_error": self.last_error,
         }
@@ -169,7 +197,9 @@ class Service:
                 setup_port = netinfo.free_tcp_port(preferred=self.setup_port_preferred)
 
                 output_name = hypr.create_headless_output()
-                hypr.set_monitor_mode(output_name, width, height, refresh)
+                width, height, refresh, scale_applied, mirror_source = self._apply_display_mode(
+                    output_name, width, height, refresh, scale=1.0,
+                )
 
                 control_socket = str(self.runtime_dir / f"{config.SERVICE_NAME}-wayvnc.sock")
                 supervisor = WayvncSupervisor(output_name, bind_ip, vnc_port, control_socket,
@@ -203,13 +233,42 @@ class Service:
             self.vnc_port = vnc_port
             self.setup_port = setup_port
             self.width, self.height, self.refresh = width, height, refresh
-            self.scale = 1.0
+            self.scale = scale_applied
+            self.mirror_source = mirror_source
             self.last_error = None
             self._wayvnc = supervisor
             self._setup_server = setup_server
             self._write_session_file()
             self._notify()
             return self._status_locked()
+
+    def _apply_display_mode(self, output_name, width, height, refresh, scale=1.0):
+        """Applies self.display_mode to `output_name`.
+
+        Returns (width, height, refresh, scale, mirror_source) reflecting
+        what was actually applied -- in mirror mode the source's own
+        current mode is read and passed explicitly (mirror alone, without
+        an explicit matching mode, was confirmed live to leave the target
+        at whatever mode it already had instead of the source's actual
+        resolution), so the caller's width/height/refresh/scale are not
+        trustworthy afterward for status-reporting purposes.
+        """
+        if self.display_mode == "mirror":
+            source = hypr.focused_monitor_name()
+            if not source or source == output_name:
+                raise hypr.HyprctlError("no other monitor is currently focused to mirror")
+            source_monitor = next((m for m in hypr.monitors() if m["name"] == source), None)
+            if source_monitor is None:
+                raise hypr.HyprctlError(f"could not read the mode of monitor {source!r}")
+            src_width = source_monitor["width"]
+            src_height = source_monitor["height"]
+            src_refresh = source_monitor.get("refreshRate")
+            hypr.set_monitor_mirror(output_name, source, src_width, src_height, src_refresh)
+            return src_width, src_height, src_refresh, 1.0, source
+
+        hypr.set_monitor_mode(output_name, width, height, refresh, scale=scale,
+                               position=self.position)
+        return width, height, refresh, scale, None
 
     def _handle_client_report(self, css_width: int, css_height: int, dpr: float) -> None:
         """Reconfigure the output from the setup page's reported display metrics.
@@ -219,7 +278,14 @@ class Service:
         headless output is set to the tablet's *physical* pixel count
         (css * dpr) with a matching Hyprland scale, so wayvnc captures at
         native resolution while on-screen UI stays a legible logical size.
+
+        A no-op while mirroring: the mirrored output's resolution is
+        dictated by its source, not by the tablet, and this report is a
+        passive side effect of the tablet merely loading the setup page --
+        not something that should surface as an error to the user.
         """
+        if self.display_mode == "mirror":
+            return
         physical_width = round(css_width * dpr)
         physical_height = round(css_height * dpr)
         self.set_resolution(physical_width, physical_height, scale=dpr)
@@ -248,6 +314,7 @@ class Service:
             self.vnc_port = None
             self.setup_port = None
             self.width = self.height = self.refresh = self.scale = None
+            self.mirror_source = None
             self.last_error = None
             self._notify()
             return self._status_locked()
@@ -271,9 +338,57 @@ class Service:
         with self._lock:
             if self.state != STATE_RUNNING:
                 raise ServiceError("cannot set resolution while not running")
+            if self.display_mode == "mirror":
+                raise ServiceError("cannot set resolution while mirroring another screen")
             refresh = refresh or self.refresh
             scale = scale if scale is not None else (self.scale or 1.0)
-            hypr.set_monitor_mode(self.output_name, width, height, refresh, scale=scale)
+            hypr.set_monitor_mode(self.output_name, width, height, refresh, scale=scale,
+                                   position=self.position)
             self.width, self.height, self.refresh, self.scale = width, height, refresh, scale
+            self._notify()
+            return self._status_locked()
+
+    def set_position(self, position: str) -> dict:
+        with self._lock:
+            if position not in config.VALID_POSITIONS:
+                raise ServiceError(
+                    f"invalid position {position!r}, must be one of {config.VALID_POSITIONS}"
+                )
+            self.position = position
+            self._save_settings()
+            # Position is meaningless while mirroring (the mirrored output
+            # has no position of its own), and reapplying via
+            # set_monitor_mode -- which always writes mirror="none" -- would
+            # break the mirror out from under the user. Persist the
+            # preference either way; it takes effect on the next switch
+            # back to extend mode.
+            if self.state == STATE_RUNNING and self.display_mode == "extend":
+                hypr.set_monitor_mode(self.output_name, self.width, self.height, self.refresh,
+                                       scale=self.scale, position=position)
+            self._notify()
+            return self._status_locked()
+
+    def set_display_mode(self, mode: str) -> dict:
+        with self._lock:
+            if mode not in config.VALID_DISPLAY_MODES:
+                raise ServiceError(
+                    f"invalid display mode {mode!r}, must be one of {config.VALID_DISPLAY_MODES}"
+                )
+            self.display_mode = mode
+            self._save_settings()
+            if self.state == STATE_RUNNING:
+                try:
+                    width, height, refresh, scale, mirror_source = self._apply_display_mode(
+                        self.output_name,
+                        self.width or self.default_width,
+                        self.height or self.default_height,
+                        self.refresh or self.default_refresh,
+                        scale=self.scale or 1.0,
+                    )
+                except hypr.HyprctlError as exc:
+                    raise ServiceError(str(exc)) from exc
+                self.width, self.height, self.refresh, self.scale, self.mirror_source = (
+                    width, height, refresh, scale, mirror_source,
+                )
             self._notify()
             return self._status_locked()

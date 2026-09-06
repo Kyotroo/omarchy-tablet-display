@@ -18,6 +18,19 @@ DEFAULT_HEIGHT = 1080
 DEFAULT_REFRESH = 60.0
 DEFAULT_VNC_PORT = 5900
 DEFAULT_SETUP_PORT = 5810
+DEFAULT_POSITION = "auto-right"
+DEFAULT_DISPLAY_MODE = "extend"
+
+# Hyprland's own vocabulary for hl.monitor()'s `position`, confirmed live
+# (each places the new output relative to whatever else is already placed).
+VALID_POSITIONS = ("auto-left", "auto-right", "auto-up", "auto-down")
+
+# "extend": an independent output with its own workspace(s), same as any
+# real second monitor in Hyprland -- there is no separate "extend" distinct
+# from this; every monitor already gets its own workspace.
+# "mirror": clones another output's pixels via hl.monitor's `mirror` field;
+# the mirrored output gets no workspace of its own.
+VALID_DISPLAY_MODES = ("extend", "mirror")
 
 
 def runtime_dir() -> Path:
@@ -43,6 +56,10 @@ def wayvnc_control_socket_path() -> Path:
 
 def session_file_path() -> Path:
     return state_dir() / "session.json"
+
+
+def settings_file_path() -> Path:
+    return state_dir() / "settings.json"
 
 
 def setup_page_path() -> Path:
