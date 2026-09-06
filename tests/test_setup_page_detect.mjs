@@ -44,7 +44,7 @@ function runPage({ userAgent, userAgentData, platform, maxTouchPoints, vncPort, 
   for (const id of [
     "reportStatus", "connectButton", "connectLabel", "storeStep",
     "storeStepLabel", "storeLinks", "manualAddress",
-    "passwordBlock", "manualPassword",
+    "passwordBlock", "manualUsername", "manualPassword",
   ]) {
     elements[id] = makeElement(id);
   }
@@ -74,6 +74,7 @@ function runPage({ userAgent, userAgentData, platform, maxTouchPoints, vncPort, 
 
   const patched = scriptBody
     .replace(/__VNC_PORT__/, String(vncPort ?? 5900))
+    .replace(/__VNC_USERNAME__/, "tablet")
     .replace(/__VNC_PASSWORD__/, vncPassword ?? "");
   vm.createContext(sandbox);
   vm.runInContext(patched, sandbox);
@@ -136,6 +137,7 @@ function runPage({ userAgent, userAgentData, platform, maxTouchPoints, vncPort, 
   });
   assert.equal(els.passwordBlock.hidden, false);
   assert.equal(els.manualPassword.textContent, "Ab3dEfGh9k");
+  assert.equal(els.manualUsername.textContent, "tablet");
 }
 {
   const els = runPage({

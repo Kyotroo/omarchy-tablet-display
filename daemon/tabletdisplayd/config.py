@@ -21,6 +21,14 @@ DEFAULT_SETUP_PORT = 5810
 DEFAULT_POSITION = "auto-right"
 DEFAULT_DISPLAY_MODE = "extend"
 DEFAULT_ENCRYPTION_ENABLED = False
+# Fixed, not a secret: some VNC clients (confirmed with RealVNC Viewer)
+# prompt for a username even though wayvnc defaults to an empty one, and
+# leaving that blank is not obvious on a mobile keyboard. A constant,
+# always-displayed value removes the ambiguity; the password is what
+# actually protects the connection.
+VNC_USERNAME = "tablet"
+MIN_PASSWORD_LENGTH = 4
+MAX_PASSWORD_LENGTH = 64
 
 # Hyprland's own vocabulary for hl.monitor()'s `position`, confirmed live
 # (each places the new output relative to whatever else is already placed).

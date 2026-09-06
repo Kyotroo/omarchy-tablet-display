@@ -168,6 +168,8 @@ class IPCServer:
                 result = self.service.set_encryption(params["enabled"])
             elif method == protocol.METHOD_REGENERATE_PASSWORD:
                 result = self.service.regenerate_password()
+            elif method == protocol.METHOD_SET_PASSWORD:
+                result = self.service.set_password(params["password"])
             elif method == protocol.METHOD_GET_QR:
                 result = {"png_base64": self.service.get_qr_png_base64()}
             elif method == protocol.METHOD_SET_RESOLUTION:

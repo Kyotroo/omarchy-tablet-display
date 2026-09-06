@@ -54,6 +54,25 @@ class SetupServerTestCase(unittest.TestCase):
         self.assertIn("5900", body)
         self.assertNotIn("__VNC_PORT__", body)
 
+    def test_setup_page_shows_username_and_password_when_encrypted(self):
+        from tabletdisplayd import config, netinfo
+
+        secure = SetupServer(
+            "127.0.0.1", netinfo.free_tcp_port(), PAGE_PATH, vnc_port=5900,
+            on_report=lambda w, h, d: None, vnc_password="Ab3dEfGh9k",
+        )
+        secure.start()
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{secure.port}/setup", timeout=3) as res:
+                body = res.read().decode()
+        finally:
+            secure.stop()
+
+        self.assertIn("Ab3dEfGh9k", body)
+        self.assertIn(config.VNC_USERNAME, body)
+        self.assertNotIn("__VNC_PASSWORD__", body)
+        self.assertNotIn("__VNC_USERNAME__", body)
+
     def test_qr_png_served(self):
         with self.get("/qr.png") as res:
             body = res.read()

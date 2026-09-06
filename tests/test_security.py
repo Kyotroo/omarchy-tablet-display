@@ -30,6 +30,23 @@ class PasswordTestCase(unittest.TestCase):
             self.assertNotIn(char, password)
 
 
+class ValidatePasswordTestCase(unittest.TestCase):
+    def test_accepts_password_within_length_bounds(self):
+        security.validate_password("hunter2")  # must not raise
+
+    def test_rejects_too_short(self):
+        with self.assertRaises(security.SecurityError):
+            security.validate_password("abc")
+
+    def test_rejects_too_long(self):
+        with self.assertRaises(security.SecurityError):
+            security.validate_password("a" * 65)
+
+    def test_accepts_boundary_lengths(self):
+        security.validate_password("a" * 4)
+        security.validate_password("a" * 64)
+
+
 class CertTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(dir=os.environ["TEST_TMP_DIR"]))
@@ -69,6 +86,7 @@ class WriteWayvncConfigTestCase(unittest.TestCase):
         self.assertIn(f"certificate_file={self.cert_path}", text)
         self.assertIn(f"private_key_file={self.key_path}", text)
         self.assertIn("password=hunter2", text)
+        self.assertIn(f"username={security.config.VNC_USERNAME}", text)
 
     def test_config_file_is_private(self):
         security.write_wayvnc_config(self.config_path, self.cert_path, self.key_path, "hunter2")

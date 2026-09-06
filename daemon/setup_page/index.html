@@ -118,6 +118,8 @@
       <p class="hint">Open your VNC app and connect to this address if the button above
         doesn't work.</p>
       <div id="passwordBlock" hidden>
+        <h2 style="margin-top: 14px;">Username</h2>
+        <code class="address" id="manualUsername"></code>
         <h2 style="margin-top: 14px;">Password</h2>
         <code class="address" id="manualPassword"></code>
       </div>
@@ -141,12 +143,17 @@
   var storeLinks = document.getElementById("storeLinks");
   var manualAddress = document.getElementById("manualAddress");
   var passwordBlock = document.getElementById("passwordBlock");
+  var manualUsername = document.getElementById("manualUsername");
   var manualPassword = document.getElementById("manualPassword");
 
   // Substituted at serve time, same as the port constant above -- empty
-  // when the session isn't password-protected.
+  // when the session isn't password-protected. The username is fixed
+  // (not a secret) but some VNC clients prompt for one even though
+  // wayvnc defaults to blank, so it is shown whenever the password is.
+  var VNC_USERNAME = "__VNC_USERNAME__";
   var VNC_PASSWORD = "__VNC_PASSWORD__";
   if (VNC_PASSWORD) {
+    manualUsername.textContent = VNC_USERNAME;
     manualPassword.textContent = VNC_PASSWORD;
     passwordBlock.hidden = false;
   }

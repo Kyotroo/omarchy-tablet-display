@@ -16,7 +16,7 @@ Panel {
     state: "stopped", bind_ip: null, vnc_port: null, setup_url: null,
     qr_url: null, width: null, height: null, position: "auto-right",
     display_mode: "extend", mirror_source: null,
-    encryption_enabled: false, vnc_password: null,
+    encryption_enabled: false, vnc_username: null, vnc_password: null,
     client_connected: false, last_error: null,
   })
   readonly property bool daemonReachable: hostWidget ? hostWidget.daemonReachable : false
@@ -104,11 +104,26 @@ Panel {
     open: root.opened
     centerOnBar: true
     contentWidth: popup.fittedContentWidth(Style.space(320))
-    contentHeight: popup.fittedContentHeight(content.implicitHeight, Style.space(560))
+    contentHeight: popup.fittedContentHeight(content.implicitHeight, Style.space(620))
+
+    // The panel grew past a fixed height once encryption/position/mode
+    // controls were added -- wrapped in a Flickable (touchpad-guard's own
+    // Panel.qml uses the same pattern) so content past the available
+    // screen height scrolls instead of being clipped with no way to reach
+    // it. fittedContentHeight above already caps the popup itself to the
+    // screen; this is what makes anything beyond that cap reachable.
+    Flickable {
+      id: scrollArea
+      anchors.fill: parent
+      contentWidth: width
+      contentHeight: content.implicitHeight
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
+      interactive: contentHeight > height
 
     Column {
       id: content
-      width: parent.width
+      width: scrollArea.width
       spacing: Style.spacing.lg
 
       Row {
@@ -328,12 +343,20 @@ Panel {
 
           Text {
             width: parent.width
-            text: "VNC password (enter this on the tablet)"
+            text: "VNC username / password (enter these on the tablet)"
             textFormat: Text.PlainText
             color: Qt.darker(root.foreground, 1.4)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
             font.bold: true
+          }
+
+          Text {
+            text: root.status.vnc_username || ""
+            textFormat: Text.PlainText
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
           }
 
           Row {
@@ -359,9 +382,37 @@ Panel {
             }
           }
 
+          Row {
+            width: parent.width
+            spacing: Style.spacing.md
+
+            TextField {
+              id: customPasswordField
+              width: parent.width - setPasswordButton.width - parent.spacing
+              password: true
+              placeholderText: "Or choose your own password…"
+              foreground: root.foreground
+              accent: Color.accent
+              onAccepted: setPasswordButton.clicked()
+            }
+
+            Button {
+              id: setPasswordButton
+              text: "Set"
+              bordered: true
+              enabled: customPasswordField.text.length >= 4
+              foreground: root.foreground
+              background: root.background
+              onClicked: {
+                hostWidget.setPassword(customPasswordField.text)
+                customPasswordField.text = ""
+              }
+            }
+          }
+
           Text {
             width: parent.width
-            text: "The tablet's browser also shows this on the setup page. " +
+            text: "The tablet's browser also shows the username/password on the setup page. " +
               "Also shown here since you may already be past that step."
             wrapMode: Text.WordWrap
             textFormat: Text.PlainText
@@ -381,6 +432,7 @@ Panel {
         background: root.background
         onClicked: root.running ? hostWidget.stop() : hostWidget.start()
       }
+    }
     }
   }
 }

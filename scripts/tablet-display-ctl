@@ -9,6 +9,7 @@
     tablet-display-ctl set-display-mode extend|mirror
     tablet-display-ctl set-encryption on|off
     tablet-display-ctl regenerate-password
+    tablet-display-ctl set-password <password>
     tablet-display-ctl get-qr
 
 Exists for manual verification and as a debugging tool; the QML panel is the
@@ -30,6 +31,7 @@ METHOD_ALIASES = {
     "set-display-mode": "set_display_mode",
     "set-encryption": "set_encryption",
     "regenerate-password": "regenerate_password",
+    "set-password": "set_password",
     "get-qr": "get_qr",
 }
 
@@ -73,6 +75,10 @@ def main(argv):
         if len(argv) < 2 or argv[1] not in ("on", "off"):
             sys.exit("set-encryption needs on|off")
         params["enabled"] = argv[1] == "on"
+    elif method == "set_password":
+        if len(argv) < 2:
+            sys.exit("set-password needs a password")
+        params["password"] = argv[1]
 
     request = {
         "type": "request",

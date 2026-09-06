@@ -20,7 +20,7 @@ BarWidget {
     setup_port: null, setup_url: null, qr_url: null, width: null,
     height: null, refresh: null, scale: null, position: "auto-right",
     display_mode: "extend", mirror_source: null,
-    encryption_enabled: false, vnc_password: null,
+    encryption_enabled: false, vnc_username: null, vnc_password: null,
     client_connected: false, last_error: null,
   })
   property var status: offlineStatus
@@ -76,6 +76,7 @@ BarWidget {
   function setDisplayMode(mode) { _send("set_display_mode", { mode: mode }) }
   function setEncryption(enabled) { _send("set_encryption", { enabled: enabled }) }
   function regeneratePassword() { _send("regenerate_password", {}) }
+  function setPassword(password) { _send("set_password", { password: password }) }
   function requestQr() { _send("get_qr", {}) }
 
   function _applyStatus(newStatus) {

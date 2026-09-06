@@ -194,6 +194,7 @@ class Service:
             "display_mode": self.display_mode,
             "mirror_source": self.mirror_source,
             "encryption_enabled": self.encryption_enabled,
+            "vnc_username": config.VNC_USERNAME if self.encryption_enabled else None,
             "vnc_password": self.vnc_password if self.encryption_enabled else None,
             "client_connected": client_connected,
             "last_error": self.last_error,
@@ -480,23 +481,35 @@ class Service:
             return self._status_locked()
 
     def regenerate_password(self) -> dict:
-        """Issues a fresh password, invalidating the old one immediately.
-
-        Applies live if a session is running (restarts wayvnc with the new
-        config, same as set_encryption) so a leaked/shared-too-widely
-        password can actually be revoked, not just changed for next time.
-        """
+        """Issues a fresh random password, invalidating the old one immediately."""
         with self._lock:
-            self.vnc_password = security.generate_password()
-            self._save_settings()
+            return self._apply_new_password(security.generate_password())
 
-            if self.state == STATE_RUNNING and self.encryption_enabled:
-                prior_width, prior_height, prior_refresh = self.width, self.height, self.refresh
-                self.stop()
-                status = self.start(width=prior_width, height=prior_height, refresh=prior_refresh)
-                if status["state"] == STATE_ERROR:
-                    raise ServiceError(status["last_error"] or "failed to apply new password")
-                return status
+    def set_password(self, password: str) -> dict:
+        """Sets a user-chosen password, invalidating the old one immediately."""
+        with self._lock:
+            try:
+                security.validate_password(password)
+            except security.SecurityError as exc:
+                raise ServiceError(str(exc)) from exc
+            return self._apply_new_password(password)
 
-            self._notify()
-            return self._status_locked()
+    def _apply_new_password(self, password: str) -> dict:
+        """Common tail for regenerate_password/set_password: persist, and
+        apply live (restarts wayvnc with the new config, same as
+        set_encryption) so a leaked/shared-too-widely password can
+        actually be revoked, not just changed for next time.
+        """
+        self.vnc_password = password
+        self._save_settings()
+
+        if self.state == STATE_RUNNING and self.encryption_enabled:
+            prior_width, prior_height, prior_refresh = self.width, self.height, self.refresh
+            self.stop()
+            status = self.start(width=prior_width, height=prior_height, refresh=prior_refresh)
+            if status["state"] == STATE_ERROR:
+                raise ServiceError(status["last_error"] or "failed to apply new password")
+            return status
+
+        self._notify()
+        return self._status_locked()

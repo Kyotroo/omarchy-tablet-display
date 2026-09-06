@@ -16,6 +16,8 @@ import secrets
 import subprocess
 from pathlib import Path
 
+from . import config
+
 OPENSSL = "openssl"
 
 # Excludes visually ambiguous characters (0/O, 1/l/I) -- this password gets
@@ -30,6 +32,23 @@ class SecurityError(RuntimeError):
 
 def generate_password() -> str:
     return "".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(_PASSWORD_LENGTH))
+
+
+def validate_password(password: str) -> None:
+    """Raises SecurityError for a password wayvnc/the user would regret.
+
+    No character-set restriction: unlike the auto-generated password, a
+    custom one is never read off a screen character-by-character, so
+    ambiguous characters are not a usability problem here. Only length is
+    checked -- long enough to be worth having, short enough that VNC
+    clients with old fixed-width password fields still accept it.
+    """
+    if not isinstance(password, str) or not (
+        config.MIN_PASSWORD_LENGTH <= len(password) <= config.MAX_PASSWORD_LENGTH
+    ):
+        raise SecurityError(
+            f"password must be {config.MIN_PASSWORD_LENGTH}-{config.MAX_PASSWORD_LENGTH} characters"
+        )
 
 
 def ensure_cert(cert_path: Path, key_path: Path) -> None:
@@ -66,6 +85,7 @@ def write_wayvnc_config(config_path: Path, cert_path: Path, key_path: Path, pass
         "enable_auth=true\n"
         f"certificate_file={cert_path}\n"
         f"private_key_file={key_path}\n"
+        f"username={config.VNC_USERNAME}\n"
         f"password={password}\n"
     )
     config_path.chmod(0o600)

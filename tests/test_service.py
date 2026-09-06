@@ -481,6 +481,45 @@ class ServiceTestCase(unittest.TestCase):
         self.assertIsNotNone(svc.vnc_password)
         self.assertIsNone(svc.status()["vnc_password"])
 
+    def test_username_shown_alongside_password_only_when_encrypted(self):
+        svc = self.make_service()
+        self.assertIsNone(svc.status()["vnc_username"])
+        svc.set_encryption(True)
+        self.assertEqual(svc.status()["vnc_username"], "tablet")
+
+    def test_set_password_rejects_too_short(self):
+        svc = self.make_service()
+        with self.assertRaises(ServiceError):
+            svc.set_password("abc")
+
+    def test_set_password_accepts_a_chosen_password(self):
+        svc = self.make_service()
+        svc.set_encryption(True)
+        svc.set_password("correct-horse-battery-staple")
+        self.assertEqual(svc.vnc_password, "correct-horse-battery-staple")
+        self.assertEqual(svc.status()["vnc_password"], "correct-horse-battery-staple")
+
+    def test_set_password_while_running_restarts_with_new_config(self):
+        svc = self.make_service()
+        svc.set_encryption(True)
+        svc.start()
+
+        status = svc.set_password("correct-horse-battery-staple")
+
+        self.assertEqual(status["state"], STATE_RUNNING)
+        config_text = (self.state_dir / "tls" / "wayvnc-secure.conf").read_text()
+        self.assertIn("password=correct-horse-battery-staple", config_text)
+
+    def test_set_password_persists_across_stop_start(self):
+        svc = self.make_service()
+        svc.set_encryption(True)
+        svc.set_password("correct-horse-battery-staple")
+        svc.start()
+        svc.stop()
+
+        reloaded = self.make_service()
+        self.assertEqual(reloaded.vnc_password, "correct-horse-battery-staple")
+
     # -- crash / recovery ----------------------------------------------------
 
     def test_wayvnc_respawns_after_unexpected_exit(self):

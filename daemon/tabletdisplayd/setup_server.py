@@ -15,7 +15,7 @@ import json
 import sys
 import threading
 
-from . import qrcode_gen
+from . import config, qrcode_gen
 
 MAX_REPORT_BODY = 8192
 
@@ -130,6 +130,7 @@ class SetupServer:
         page_text = self.page_path.read_text(encoding="utf-8")
         page_text = page_text.replace("__VNC_PORT__", str(self.vnc_port))
         page_text = page_text.replace("__VNC_PASSWORD__", self.vnc_password or "")
+        page_text = page_text.replace("__VNC_USERNAME__", config.VNC_USERNAME)
         page_bytes = page_text.encode("utf-8")
         qr_png = qrcode_gen.generate_png(self.url)
         self.qr_png_bytes = qr_png
