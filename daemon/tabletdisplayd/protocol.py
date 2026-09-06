@@ -1,0 +1,56 @@
+"""IPC wire protocol for kdm-tablet-displayd.
+
+Newline-delimited JSON over a Unix domain socket, one JSON object per line.
+Shape mirrors hyprmoncfg's protocol (request/response/event with an explicit
+protocol_version) so a client can feature-detect instead of guessing from a
+release number.
+"""
+
+PROTOCOL_VERSION = 1
+MIN_PROTOCOL_VERSION = 1
+
+METHOD_STATUS = "status"
+METHOD_SUBSCRIBE = "subscribe"
+METHOD_START = "start"
+METHOD_STOP = "stop"
+METHOD_SET_RESOLUTION = "set_resolution"
+
+EVENT_STATUS = "status"
+
+KNOWN_METHODS = {
+    METHOD_STATUS,
+    METHOD_SUBSCRIBE,
+    METHOD_START,
+    METHOD_STOP,
+    METHOD_SET_RESOLUTION,
+}
+
+
+def make_response(request, result=None, error=None):
+    response = {
+        "type": "response",
+        "protocol_version": request.get("protocol_version", PROTOCOL_VERSION),
+        "server_protocol_version": PROTOCOL_VERSION,
+        "id": request.get("id"),
+    }
+    if error is not None:
+        response["error"] = error
+    elif result is not None:
+        response["result"] = result
+    return response
+
+
+def error_response(request, code, message, data=None):
+    error = {"code": code, "message": message}
+    if data:
+        error["data"] = data
+    return make_response(request, error=error)
+
+
+def make_event(event, data):
+    return {
+        "type": "event",
+        "protocol_version": PROTOCOL_VERSION,
+        "event": event,
+        "data": data,
+    }

@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Fake wayvncctl for tests: speaks the private line protocol fixtures/bin/wayvnc
+implements. See that file for the protocol.
+"""
+import socket
+import sys
+
+
+def main(argv):
+    control_path = None
+    command = None
+    for i, arg in enumerate(argv):
+        if arg == "--socket":
+            control_path = argv[i + 1]
+        elif arg not in ("--json",) and not arg.startswith("--") and control_path is not None and command is None:
+            pass
+    # Simple positional scan: last non-flag, non-socket-value argument is the command.
+    skip_next = False
+    positionals = []
+    for i, arg in enumerate(argv):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--socket":
+            skip_next = True
+            continue
+        if arg.startswith("--"):
+            continue
+        positionals.append(arg)
+    command = positionals[-1] if positionals else None
+
+    if control_path is None or command is None:
+        print("fake wayvncctl: --socket and a command are required", file=sys.stderr)
+        return 1
+
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.connect(control_path)
+    except OSError as exc:
+        print(f"ERROR: connect failed: {exc}", file=sys.stderr)
+        return 1
+
+    with sock:
+        sock.sendall((command + "\n").encode())
+        response = sock.recv(65536).decode("utf-8", errors="replace")
+        print(response.strip())
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

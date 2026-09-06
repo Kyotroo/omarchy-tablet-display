@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Minimal CLI client for kdm-tablet-displayd's IPC socket.
+
+    tablet-display-ctl status
+    tablet-display-ctl start [width height [refresh]]
+    tablet-display-ctl stop
+    tablet-display-ctl set-resolution width height [refresh]
+
+Exists for manual verification and as a debugging tool; the QML panel is the
+real client and speaks the same protocol directly over Quickshell's Socket
+type.
+"""
+import json
+import os
+import socket
+import sys
+import uuid
+
+METHOD_ALIASES = {
+    "status": "status",
+    "start": "start",
+    "stop": "stop",
+    "set-resolution": "set_resolution",
+}
+
+
+def socket_path():
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if not runtime_dir:
+        sys.exit("XDG_RUNTIME_DIR is not set")
+    return os.path.join(runtime_dir, "kdm-tablet-displayd.sock")
+
+
+def main(argv):
+    if not argv or argv[0] not in METHOD_ALIASES:
+        print(__doc__, file=sys.stderr)
+        return 2
+
+    method = METHOD_ALIASES[argv[0]]
+    params = {}
+    if method == "start" and len(argv) > 1:
+        params["width"] = int(argv[1])
+        if len(argv) > 2:
+            params["height"] = int(argv[2])
+        if len(argv) > 3:
+            params["refresh"] = float(argv[3])
+    elif method == "set_resolution":
+        if len(argv) < 3:
+            sys.exit("set-resolution needs width and height")
+        params["width"] = int(argv[1])
+        params["height"] = int(argv[2])
+        if len(argv) > 3:
+            params["refresh"] = float(argv[3])
+
+    request = {
+        "type": "request",
+        "protocol_version": 1,
+        "id": str(uuid.uuid4()),
+        "method": method,
+        "params": params,
+    }
+
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        sock.connect(socket_path())
+        sock.sendall((json.dumps(request) + "\n").encode("utf-8"))
+        sock.shutdown(socket.SHUT_WR)
+        buf = b""
+        while True:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            buf += chunk
+            if b"\n" in buf:
+                break
+
+    line = buf.split(b"\n", 1)[0]
+    response = json.loads(line)
+    print(json.dumps(response, indent=2))
+    return 1 if response.get("error") else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

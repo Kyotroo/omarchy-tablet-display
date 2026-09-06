@@ -1,0 +1,12 @@
+[Unit]
+Description=Tablet Display daemon (kdm-tablet-displayd)
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.config/omarchy/plugins/kdm.tablet-display/daemon/tablet-displayd
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""Fake `ip` for tests: only supports `ip route get 1.1.1.1`."""
+import os
+import sys
+
+
+def main(argv):
+    if argv[:3] == ["route", "get", "1.1.1.1"]:
+        addr = os.environ.get("FAKE_LAN_IP")
+        if not addr:
+            print("RTNETLINK answers: Network is unreachable", file=sys.stderr)
+            return 2
+        print(f"1.1.1.1 via 192.0.2.1 dev eth0 src {addr} uid 1000")
+        return 0
+    print(f"fake ip: unhandled command {argv}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

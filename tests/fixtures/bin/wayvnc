@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Fake wayvnc for tests: a long-running process with a Unix control socket.
+
+Speaks a private one-line protocol with fixtures/bin/wayvncctl (not the real
+wayvnc wire format -- nothing outside this fixture pair talks to it):
+`client-list` returns a JSON array of length $FAKE_WAYVNC_CLIENT_COUNT,
+`wayvnc-exit` acks then exits. Set $FAKE_WAYVNC_CRASH_AFTER to make it exit
+non-zero on its own after N seconds, simulating the DPMS-drop scenario.
+"""
+import os
+import socket
+import sys
+import threading
+from pathlib import Path
+
+
+def log(*parts):
+    path = os.environ.get("OMARCHY_TEST_LOG")
+    if not path:
+        return
+    with open(path, "a") as f:
+        f.write(" ".join(parts) + "\n")
+
+
+def main(argv):
+    log("wayvnc", *argv)
+
+    control_path = None
+    for i, arg in enumerate(argv):
+        if arg == "--socket":
+            control_path = argv[i + 1]
+    if control_path is None:
+        print("fake wayvnc: --socket is required", file=sys.stderr)
+        return 1
+
+    if os.path.exists(control_path):
+        os.remove(control_path)
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(control_path)
+    server.listen(1)
+
+    # Crash exactly once (guarded by a marker file), not on every respawn --
+    # otherwise a respawned instance would inherit the same env var from the
+    # parent daemon process and crash again, forever, which is not what a
+    # "does it recover from one crash" test wants to exercise.
+    crash_after = os.environ.get("FAKE_WAYVNC_CRASH_AFTER")
+    marker = os.environ.get("FAKE_WAYVNC_CRASH_MARKER")
+    if crash_after and marker and not os.path.exists(marker):
+        Path(marker).touch()
+        threading.Timer(float(crash_after), lambda: os._exit(1)).start()
+
+    while True:
+        try:
+            conn, _ = server.accept()
+        except OSError:
+            return 0
+        with conn:
+            line = conn.recv(4096).decode("utf-8").strip()
+            if line == "client-list":
+                count = int(os.environ.get("FAKE_WAYVNC_CLIENT_COUNT", "0"))
+                conn.sendall(("[" + ",".join(["{}"] * count) + "]\n").encode())
+            elif line == "wayvnc-exit":
+                conn.sendall(b"ok\n")
+                os.remove(control_path)
+                return 0
+            else:
+                conn.sendall(b"{}\n")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

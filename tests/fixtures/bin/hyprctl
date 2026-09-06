@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+"""Fake hyprctl for tests.
+
+State lives in $FAKE_HYPR_STATE (a JSON file: {"monitors": [...], "next_headless": N}).
+Logs every invocation to $OMARCHY_TEST_LOG if set, one line per call.
+Supports exactly the subset the daemon uses: `monitors -j`, `output create
+headless`, `output remove NAME`, `eval 'hl.monitor({...})'`.
+"""
+import json
+import os
+import re
+import sys
+
+STATE_PATH = os.environ["FAKE_HYPR_STATE"]
+
+
+def load():
+    with open(STATE_PATH) as f:
+        return json.load(f)
+
+
+def save(state):
+    with open(STATE_PATH, "w") as f:
+        json.dump(state, f)
+
+
+def log(*parts):
+    path = os.environ.get("OMARCHY_TEST_LOG")
+    if not path:
+        return
+    with open(path, "a") as f:
+        f.write(" ".join(parts) + "\n")
+
+
+def fail_if_forced(command):
+    forced = os.environ.get("FAKE_HYPR_FAIL")
+    if forced and forced == command:
+        print(f"forced failure for {command}", file=sys.stderr)
+        sys.exit(1)
+
+
+def main(argv):
+    log("hyprctl", *argv)
+    state = load()
+
+    if argv[:2] == ["monitors", "-j"]:
+        print(json.dumps(state["monitors"]))
+        return 0
+
+    if argv[:3] == ["output", "create", "headless"]:
+        fail_if_forced("output create headless")
+        name = f"HEADLESS-{state['next_headless']}"
+        state["next_headless"] += 1
+        state["monitors"].append({
+            "name": name, "width": 1920, "height": 1080, "refreshRate": 60.0,
+        })
+        save(state)
+        print("ok")
+        return 0
+
+    if argv[:2] == ["output", "remove"]:
+        name = argv[2]
+        before = len(state["monitors"])
+        state["monitors"] = [m for m in state["monitors"] if m["name"] != name]
+        save(state)
+        if len(state["monitors"]) == before:
+            print("output not found", file=sys.stderr)
+            return 1
+        print("ok")
+        return 0
+
+    if argv[0] == "eval":
+        fail_if_forced("eval")
+        match = re.search(r'output=("[^"]*"|\'[^\']*\'),\s*mode=("[^"]*"|\'[^\']*\')', argv[1])
+        if not match:
+            print("could not parse eval", file=sys.stderr)
+            return 1
+        name = json.loads(match.group(1))
+        mode = json.loads(match.group(2))
+        dims = mode.split("@")[0]
+        width, height = (int(x) for x in dims.split("x"))
+        refresh = float(mode.split("@")[1]) if "@" in mode else 60.0
+        for m in state["monitors"]:
+            if m["name"] == name:
+                m["width"], m["height"], m["refreshRate"] = width, height, refresh
+        save(state)
+        print("ok")
+        return 0
+
+    print(f"fake hyprctl: unhandled command {argv}", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
