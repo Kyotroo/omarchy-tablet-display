@@ -161,15 +161,44 @@ Panel {
         font.pixelSize: Style.font.bodySmall
       }
 
-      Text {
+      Column {
         visible: !root.daemonReachable
         width: parent.width
-        text: "kdm-tablet-displayd isn't reachable. Check: systemctl --user status kdm-tablet-displayd"
-        wrapMode: Text.WordWrap
-        textFormat: Text.PlainText
-        color: Qt.darker(root.foreground, 1.35)
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.bodySmall
+        spacing: Style.spacing.sm
+
+        Text {
+          width: parent.width
+          text: "The background service isn't running yet. This is a " +
+            "one-time step after installing the plugin."
+          wrapMode: Text.WordWrap
+          textFormat: Text.PlainText
+          color: Qt.darker(root.foreground, 1.35)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+
+        Button {
+          width: parent.width
+          text: hostWidget.installing ? "Setting up…" : "Set up now"
+          iconText: "󰑓"
+          iconSpinning: hostWidget.installing
+          bordered: true
+          enabled: !hostWidget.installing
+          foreground: root.foreground
+          background: root.background
+          onClicked: hostWidget.runInstall()
+        }
+
+        Text {
+          visible: hostWidget.installOutput !== ""
+          width: parent.width
+          text: hostWidget.installOutput
+          wrapMode: Text.WrapAnywhere
+          textFormat: Text.PlainText
+          color: Qt.darker(root.foreground, 1.35)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
       }
 
       // -- QR + connection details, only meaningful once a session is running --

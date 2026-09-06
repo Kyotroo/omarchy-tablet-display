@@ -28,6 +28,27 @@ BarWidget {
   readonly property bool running: status.state === "running"
   readonly property bool hasError: status.state === "error"
 
+  // `omarchy plugin add`/`remove` only do file operations (clone, enable,
+  // delete) -- confirmed against the plugin docs, there is no install/remove
+  // hook that would run scripts/install-daemon.sh automatically. Without
+  // this, a fresh install would silently never start the daemon. Mirrors
+  // kdm.presets' own pattern for its post-boot hook: ask consent and run it
+  // from inside the plugin, not a silent background action on load.
+  readonly property string installScriptPath: {
+    var url = String(Qt.resolvedUrl("scripts/install-daemon.sh"))
+    if (url.indexOf("file://") === 0) url = url.slice(7)
+    return decodeURIComponent(url)
+  }
+  property bool installing: false
+  property string installOutput: ""
+
+  function runInstall() {
+    if (root.installing) return
+    root.installing = true
+    root.installOutput = ""
+    installProc.running = true
+  }
+
   // Delivered over this same socket as base64, not as an Image{source:
   // qr_url} network fetch -- nothing else in this shell loads Image from a
   // network URL, and testing confirmed it never resolves here (stays
@@ -126,8 +147,17 @@ BarWidget {
   // (via Loader.active) has been confirmed to actually reconnect.
   readonly property var backendSocket: socketLoader.item
   property real _lastMessageTime: 0
+  property bool _reconnectPending: false
 
+  // Hard-recreate: destroy the Loader's item and build a fresh one, rather
+  // than toggling `connected` on a possibly-wedged existing Socket -- live
+  // testing confirmed toggling `connected` on the same instance after a
+  // daemon restart never recovers it. Guarded by `_reconnectPending` so the
+  // watchdog below (which polls unconditionally) can't stack overlapping
+  // teardown/rebuild cycles on top of each other.
   function _reconnect() {
+    if (root._reconnectPending) return
+    root._reconnectPending = true
     socketLoader.active = false
     reconnectTimer.restart()
   }
@@ -135,6 +165,11 @@ BarWidget {
   Loader {
     id: socketLoader
     active: true
+    // Stamped on every (re)creation, not just left at its 0 default -- gives
+    // the watchdog timer below something to compare against instead of the
+    // "never received a message" 0 default, which would otherwise never
+    // look stale enough to act on.
+    onLoaded: root._lastMessageTime = Date.now()
     sourceComponent: Component {
       Socket {
         path: root.socketPath
@@ -149,47 +184,67 @@ BarWidget {
             root._send("subscribe", {})
           } else {
             root.status = root.offlineStatus
-            root._reconnect()
           }
         }
-        // Quickshell does not flip `connected` back to false on its own when
-        // the peer errors out -- confirmed live: without this explicit
-        // write, onConnectedChanged above never fires at all after a daemon
-        // restart (the property genuinely never changes value from this
-        // Socket's perspective), so nothing ever notices the connection is
-        // dead. Setting it here is what makes onConnectedChanged run.
         onError: function(error) { connected = false }
       }
     }
   }
 
-  // Covers both the boot-ordering case (daemon not up yet) and recovery
-  // after `socketLoader.active` was cycled false -> true.
   Timer {
     id: reconnectTimer
     interval: 3000
-    onTriggered: socketLoader.active = true
+    onTriggered: {
+      root._reconnectPending = false
+      socketLoader.active = true
+    }
   }
 
-  // A remote-side close (daemon restart/crash-recover) is not guaranteed
-  // to be observable through the Socket's own signals in every case,
-  // confirmed live: after `systemctl --user restart kdm-tablet-displayd`,
-  // this widget sometimes kept reporting stale status indefinitely with no
-  // further Socket error logged at all. This app-level heartbeat treats
-  // "no message in two whole intervals" as proof the connection is dead
-  // and forces the Loader-based hard reconnect above.
+  // The single source of truth for reconnection: an unconditional poll,
+  // not a reaction to onError/onConnectedChanged. Confirmed live that the
+  // signal-driven chain above can silently stop producing any further
+  // connection attempts at all after the very first failure (e.g. daemon
+  // not installed yet when the widget first loads) -- no further Socket
+  // error ever gets logged, and nothing else notices. This timer doesn't
+  // care why the connection is down or whether any signal fired; it just
+  // checks the observable state every tick and forces a hard reconnect
+  // whenever it looks wrong, which is what actually recovers every case
+  // seen so far (boot-ordering, daemon restart, daemon crash-recover).
   Timer {
-    interval: 5000
+    interval: 3000
     running: true
     repeat: true
     onTriggered: {
-      if (!root.backendSocket || !root.backendSocket.connected) return
-      if (root._lastMessageTime > 0 && Date.now() - root._lastMessageTime > interval * 2) {
+      var disconnected = !root.backendSocket || !root.backendSocket.connected
+      var stale = root._lastMessageTime > 0 && (Date.now() - root._lastMessageTime > 8000)
+      if (disconnected || stale) {
         root._lastMessageTime = 0
         root._reconnect()
         return
       }
       root.refreshStatus() // doubles as the liveness probe
+    }
+  }
+
+  Process {
+    id: installProc
+    command: ["bash", root.installScriptPath]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.installOutput += String(text || "")
+    }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.installOutput += String(text || "")
+    }
+    onExited: function(exitCode) {
+      root.installing = false
+      // The ufw step inside the script needs an interactive sudo prompt
+      // this backgrounded process cannot provide (confirmed live -- sudo
+      // fails immediately with "a terminal is required" when run this
+      // way); the script already prints the exact command to run manually
+      // in that case, which installOutput surfaces in the panel as-is.
+      if (!root.daemonReachable) reconnectTimer.restart()
     }
   }
 
@@ -215,6 +270,7 @@ BarWidget {
     function close(): void { root.close() }
     function show(): void { root.open() }
     function hide(): void { root.close() }
+    function setup(): string { root.runInstall(); return "installing" }
   }
 
   BarIconButton {

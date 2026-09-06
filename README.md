@@ -27,18 +27,8 @@ toggle, scan a QR code, connect. No manual Hyprland config, no running
 
 ## Install
 
-Not yet published to a git remote or the marketplace. Once it is:
-
 ```bash
-omarchy plugin add <this repo's URL> --enable
-```
-
-For now, testing this checkout locally means placing (or symlinking) this
-directory at `~/.config/omarchy/plugins/kdm.tablet-display/`, then:
-
-```bash
-bash scripts/install-daemon.sh
-omarchy plugin enable kdm.tablet-display --section right
+omarchy plugin add https://github.com/Kyotroo/omarchy-tablet-display.git --enable
 ```
 
 The installer detects `ufw` if present, works out your LAN subnet from the

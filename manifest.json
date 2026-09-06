@@ -2,9 +2,10 @@
   "schemaVersion": 1,
   "id": "kdm.tablet-display",
   "name": "Tablet Display",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "author": "kdm",
   "license": "MIT",
+  "homepage": "https://github.com/Kyotroo/omarchy-tablet-display",
   "description": "Turn a tablet into a wireless second monitor over WiFi: click the bar toggle, scan a QR code, connect.",
   "kinds": [
     "bar-widget"
