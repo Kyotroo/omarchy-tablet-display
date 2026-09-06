@@ -19,6 +19,8 @@ rm -f -- "$runtime_dir/kdm-tablet-displayd.sock" "$runtime_dir/kdm-tablet-displa
 state_home=${XDG_STATE_HOME:-"$HOME/.local/state"}
 rm -rf -- "$state_home/omarchy/kdm-tablet-display"
 
+# shellcheck source=lib-privilege.sh
+source "$plugin_dir/scripts/lib-privilege.sh"
 # shellcheck source=lib-firewall.sh
 source "$plugin_dir/scripts/lib-firewall.sh"
 tablet_display_firewall_remove

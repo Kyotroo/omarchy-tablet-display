@@ -1,0 +1,14 @@
+#!/bin/bash
+# Fake `ufw` for tests: only supports the `allow from ... proto tcp
+# comment ...` form tablet_display_firewall_allow uses.
+if [[ "$1 $2" == "allow from" ]]; then
+  if [[ -n $FAKE_UFW_FAILS ]]; then
+    echo "fake ufw: fail" >&2
+    exit 1
+  fi
+  echo "Rule added"
+  exit 0
+fi
+
+echo "fake ufw: unhandled command $*" >&2
+exit 1

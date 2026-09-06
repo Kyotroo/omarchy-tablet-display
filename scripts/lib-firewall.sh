@@ -1,5 +1,6 @@
 # Shared firewall helpers for install-daemon.sh / uninstall-daemon.sh.
-# Source this, don't run it directly.
+# Source this, don't run it directly. Requires tablet_display_sudo from
+# lib-privilege.sh to already be sourced (both callers do this).
 #
 # wayvnc and the setup page are unauthenticated by design (LAN-only v1), so
 # they need an explicit inbound allow -- a default-deny firewall (ufw is
@@ -39,12 +40,12 @@ tablet_display_firewall_allow() {
     echo "  $TABLET_DISPLAY_SETUP_PORT and $TABLET_DISPLAY_VNC_PORT from your LAN manually." >&2
     return 0
   fi
-  if sudo ufw allow from "$subnet" to any \
+  if tablet_display_sudo ufw allow from "$subnet" to any \
       port "$TABLET_DISPLAY_SETUP_PORT,$TABLET_DISPLAY_VNC_PORT" proto tcp \
       comment "$TABLET_DISPLAY_FW_COMMENT" >/dev/null 2>&1; then
     echo "kdm.tablet-display: allowed TCP $TABLET_DISPLAY_SETUP_PORT,$TABLET_DISPLAY_VNC_PORT from $subnet in ufw."
   else
-    echo "kdm.tablet-display: could not add the ufw rule automatically (needs sudo)." >&2
+    echo "kdm.tablet-display: could not add the ufw rule automatically (prompt was dismissed/failed)." >&2
     echo "  Run this yourself if the tablet can't connect:" >&2
     echo "    sudo ufw allow from $subnet to any port $TABLET_DISPLAY_SETUP_PORT,$TABLET_DISPLAY_VNC_PORT proto tcp comment '$TABLET_DISPLAY_FW_COMMENT'" >&2
   fi
@@ -61,12 +62,12 @@ tablet_display_firewall_remove() {
   local removed_any=0
   while true; do
     local line number
-    line=$(sudo ufw status numbered 2>/dev/null \
+    line=$(tablet_display_sudo ufw status numbered 2>/dev/null \
       | grep -F "$TABLET_DISPLAY_FW_COMMENT" | head -1)
     [[ -n $line ]] || break
     number=$(grep -oP '(?<=^\[)[0-9]+(?=\])' <<<"$line")
     [[ -n $number ]] || break
-    sudo ufw --force delete "$number" >/dev/null 2>&1 || break
+    tablet_display_sudo ufw --force delete "$number" >/dev/null 2>&1 || break
     removed_any=1
   done
   if [[ $removed_any == 1 ]]; then

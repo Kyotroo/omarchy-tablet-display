@@ -48,8 +48,12 @@ below.
    the daemon does the actual screen-sharing through it), adds a scoped
    `ufw` allow rule for your LAN if `ufw` is present (see
    [Firewall](#firewall) if you use something else), and installs/starts
-   the background service itself. If `sudo` can't run non-interactively
-   in your setup, it prints the exact commands to run yourself instead of
+   the background service itself. Either of those first two can need a
+   password — Omarchy's own polkit agent (the same GUI prompt you see
+   elsewhere, e.g. when a sandboxed AI agent needs elevated access) pops
+   up for it right there, since it authenticates over D-Bus rather than
+   needing a terminal. If that agent isn't available for some reason, it
+   falls back to printing the exact command to run yourself instead of
    failing silently.
 3. Click **Start**.
 
