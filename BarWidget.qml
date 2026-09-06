@@ -77,6 +77,7 @@ BarWidget {
   function setEncryption(enabled) { _send("set_encryption", { enabled: enabled }) }
   function regeneratePassword() { _send("regenerate_password", {}) }
   function setPassword(password) { _send("set_password", { password: password }) }
+  function setUsername(username) { _send("set_username", { username: username }) }
   function requestQr() { _send("get_qr", {}) }
 
   function _applyStatus(newStatus) {

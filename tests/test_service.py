@@ -485,7 +485,44 @@ class ServiceTestCase(unittest.TestCase):
         svc = self.make_service()
         self.assertIsNone(svc.status()["vnc_username"])
         svc.set_encryption(True)
-        self.assertEqual(svc.status()["vnc_username"], "tablet")
+        self.assertEqual(svc.status()["vnc_username"], "remote")
+
+    def test_set_username_rejects_empty(self):
+        svc = self.make_service()
+        with self.assertRaises(ServiceError):
+            svc.set_username("")
+
+    def test_set_username_accepts_a_chosen_username(self):
+        svc = self.make_service()
+        svc.set_encryption(True)
+        svc.set_username("kdm")
+        self.assertEqual(svc.vnc_username, "kdm")
+        self.assertEqual(svc.status()["vnc_username"], "kdm")
+
+    def test_set_username_while_running_restarts_with_new_config(self):
+        svc = self.make_service()
+        svc.set_encryption(True)
+        svc.start()
+
+        status = svc.set_username("kdm")
+
+        self.assertEqual(status["state"], STATE_RUNNING)
+        config_text = (self.state_dir / "tls" / "wayvnc-secure.conf").read_text()
+        self.assertIn("username=kdm", config_text)
+
+    def test_set_username_persists_across_stop_start(self):
+        svc = self.make_service()
+        svc.set_encryption(True)
+        svc.set_username("kdm")
+        svc.start()
+        svc.stop()
+
+        reloaded = self.make_service()
+        self.assertEqual(reloaded.vnc_username, "kdm")
+
+    def test_username_defaults_to_remote(self):
+        svc = self.make_service()
+        self.assertEqual(svc.vnc_username, "remote")
 
     def test_set_password_rejects_too_short(self):
         svc = self.make_service()

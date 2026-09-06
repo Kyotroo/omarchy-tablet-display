@@ -34,14 +34,24 @@ def generate_password() -> str:
     return "".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(_PASSWORD_LENGTH))
 
 
+def _reject_control_characters(value: str, field: str) -> None:
+    """A newline in a value written verbatim into a `key=value` wayvnc
+    config line would inject an extra config line -- e.g. a password of
+    "x\\nenable_pam=true" would silently turn PAM on. Every value that ends
+    up in that file goes through this, whether user-chosen or generated."""
+    if any(ord(ch) < 0x20 for ch in value):
+        raise SecurityError(f"{field} cannot contain control characters or newlines")
+
+
 def validate_password(password: str) -> None:
     """Raises SecurityError for a password wayvnc/the user would regret.
 
-    No character-set restriction: unlike the auto-generated password, a
-    custom one is never read off a screen character-by-character, so
-    ambiguous characters are not a usability problem here. Only length is
-    checked -- long enough to be worth having, short enough that VNC
-    clients with old fixed-width password fields still accept it.
+    No character-set restriction beyond control characters: unlike the
+    auto-generated password, a custom one is never read off a screen
+    character-by-character, so ambiguous characters are not a usability
+    problem here. Length is checked -- long enough to be worth having,
+    short enough that VNC clients with old fixed-width password fields
+    still accept it.
     """
     if not isinstance(password, str) or not (
         config.MIN_PASSWORD_LENGTH <= len(password) <= config.MAX_PASSWORD_LENGTH
@@ -49,6 +59,17 @@ def validate_password(password: str) -> None:
         raise SecurityError(
             f"password must be {config.MIN_PASSWORD_LENGTH}-{config.MAX_PASSWORD_LENGTH} characters"
         )
+    _reject_control_characters(password, "password")
+
+
+def validate_username(username: str) -> None:
+    if not isinstance(username, str) or not (
+        config.MIN_USERNAME_LENGTH <= len(username) <= config.MAX_USERNAME_LENGTH
+    ):
+        raise SecurityError(
+            f"username must be {config.MIN_USERNAME_LENGTH}-{config.MAX_USERNAME_LENGTH} characters"
+        )
+    _reject_control_characters(username, "username")
 
 
 def ensure_cert(cert_path: Path, key_path: Path) -> None:
@@ -79,13 +100,14 @@ def ensure_cert(cert_path: Path, key_path: Path) -> None:
     key_path.chmod(0o600)
 
 
-def write_wayvnc_config(config_path: Path, cert_path: Path, key_path: Path, password: str) -> None:
+def write_wayvnc_config(config_path: Path, cert_path: Path, key_path: Path,
+                         username: str, password: str) -> None:
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         "enable_auth=true\n"
         f"certificate_file={cert_path}\n"
         f"private_key_file={key_path}\n"
-        f"username={config.VNC_USERNAME}\n"
+        f"username={username}\n"
         f"password={password}\n"
     )
     config_path.chmod(0o600)

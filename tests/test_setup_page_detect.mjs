@@ -39,7 +39,7 @@ function makeElement(id) {
   };
 }
 
-function runPage({ userAgent, userAgentData, platform, maxTouchPoints, vncPort, vncPassword }) {
+function runPage({ userAgent, userAgentData, platform, maxTouchPoints, vncPort, vncUsername, vncPassword }) {
   const elements = {};
   for (const id of [
     "reportStatus", "connectButton", "connectLabel", "storeStep",
@@ -74,7 +74,7 @@ function runPage({ userAgent, userAgentData, platform, maxTouchPoints, vncPort, 
 
   const patched = scriptBody
     .replace(/__VNC_PORT__/, String(vncPort ?? 5900))
-    .replace(/__VNC_USERNAME__/, "tablet")
+    .replace(/__VNC_USERNAME__/, vncUsername ?? "remote")
     .replace(/__VNC_PASSWORD__/, vncPassword ?? "");
   vm.createContext(sandbox);
   vm.runInContext(patched, sandbox);
@@ -137,7 +137,7 @@ function runPage({ userAgent, userAgentData, platform, maxTouchPoints, vncPort, 
   });
   assert.equal(els.passwordBlock.hidden, false);
   assert.equal(els.manualPassword.textContent, "Ab3dEfGh9k");
-  assert.equal(els.manualUsername.textContent, "tablet");
+  assert.equal(els.manualUsername.textContent, "remote");
 }
 {
   const els = runPage({

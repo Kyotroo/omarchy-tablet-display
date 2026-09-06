@@ -46,6 +46,37 @@ class ValidatePasswordTestCase(unittest.TestCase):
         security.validate_password("a" * 4)
         security.validate_password("a" * 64)
 
+    def test_rejects_embedded_newline(self):
+        # A newline written verbatim into a `key=value` wayvnc config line
+        # would inject an extra config line -- e.g. "x\nenable_pam=true".
+        with self.assertRaises(security.SecurityError):
+            security.validate_password("goodpass\nenable_pam=true")
+
+    def test_rejects_other_control_characters(self):
+        with self.assertRaises(security.SecurityError):
+            security.validate_password("good\tpass")
+
+
+class ValidateUsernameTestCase(unittest.TestCase):
+    def test_accepts_username_within_length_bounds(self):
+        security.validate_username("remote")  # must not raise
+
+    def test_rejects_empty(self):
+        with self.assertRaises(security.SecurityError):
+            security.validate_username("")
+
+    def test_rejects_too_long(self):
+        with self.assertRaises(security.SecurityError):
+            security.validate_username("a" * 65)
+
+    def test_accepts_boundary_lengths(self):
+        security.validate_username("a")
+        security.validate_username("a" * 64)
+
+    def test_rejects_embedded_newline(self):
+        with self.assertRaises(security.SecurityError):
+            security.validate_username("someone\npassword=hijacked")
+
 
 class CertTestCase(unittest.TestCase):
     def setUp(self):
@@ -80,16 +111,18 @@ class WriteWayvncConfigTestCase(unittest.TestCase):
         self.config_path = self.tmp / "wayvnc-secure.conf"
 
     def test_config_contains_required_wayvnc_keywords(self):
-        security.write_wayvnc_config(self.config_path, self.cert_path, self.key_path, "hunter2")
+        security.write_wayvnc_config(self.config_path, self.cert_path, self.key_path,
+                                      "someone", "hunter2")
         text = self.config_path.read_text()
         self.assertIn("enable_auth=true", text)
         self.assertIn(f"certificate_file={self.cert_path}", text)
         self.assertIn(f"private_key_file={self.key_path}", text)
+        self.assertIn("username=someone", text)
         self.assertIn("password=hunter2", text)
-        self.assertIn(f"username={security.config.VNC_USERNAME}", text)
 
     def test_config_file_is_private(self):
-        security.write_wayvnc_config(self.config_path, self.cert_path, self.key_path, "hunter2")
+        security.write_wayvnc_config(self.config_path, self.cert_path, self.key_path,
+                                      "someone", "hunter2")
         mode = stat.S_IMODE(self.config_path.stat().st_mode)
         self.assertEqual(mode, 0o600)
 

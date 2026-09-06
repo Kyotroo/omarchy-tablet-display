@@ -8,6 +8,7 @@ import os
 import socket
 import struct
 import sys
+import tempfile
 import time
 import unittest
 import uuid
@@ -33,7 +34,13 @@ def request(method, params=None):
 
 class DispatchTestCase(unittest.TestCase):
     def setUp(self):
-        tmp = Path(os.environ["TEST_TMP_DIR"])
+        # A fresh subdir per test: settings.json (position/display_mode/
+        # encryption/username/password) persists across Service instances
+        # by design, so tests sharing one directory would leak state
+        # between each other -- confirmed live, a set_encryption test
+        # running first made a later, unrelated test see encryption already
+        # on. Same fix ServiceTestCase already uses.
+        tmp = Path(tempfile.mkdtemp(dir=os.environ["TEST_TMP_DIR"]))
         self.svc = Service(state_dir=tmp / "state2", runtime_dir=tmp / "runtime2")
         self.server = IPCServer(tmp / "unused.sock", self.svc)
 
@@ -89,6 +96,15 @@ class DispatchTestCase(unittest.TestCase):
     def test_regenerate_password_while_stopped_succeeds(self):
         response, _ = self.server.dispatch(request(protocol.METHOD_REGENERATE_PASSWORD))
         self.assertNotIn("error", response)
+
+    def test_set_username_missing_params_is_invalid_params_error(self):
+        response, _ = self.server.dispatch(request(protocol.METHOD_SET_USERNAME, {}))
+        self.assertEqual(response["error"]["code"], "invalid_params")
+
+    def test_set_username_valid_value_succeeds(self):
+        response, _ = self.server.dispatch(request(protocol.METHOD_SET_USERNAME, {"username": "kdm"}))
+        self.assertNotIn("error", response)
+        self.assertEqual(response["result"]["vnc_username"], None)  # hidden while encryption is off
 
     def test_set_resolution_missing_params_is_invalid_params_error(self):
         response, _ = self.server.dispatch(request(protocol.METHOD_SET_RESOLUTION, {}))

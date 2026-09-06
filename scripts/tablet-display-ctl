@@ -10,6 +10,7 @@
     tablet-display-ctl set-encryption on|off
     tablet-display-ctl regenerate-password
     tablet-display-ctl set-password <password>
+    tablet-display-ctl set-username <username>
     tablet-display-ctl get-qr
 
 Exists for manual verification and as a debugging tool; the QML panel is the
@@ -32,6 +33,7 @@ METHOD_ALIASES = {
     "set-encryption": "set_encryption",
     "regenerate-password": "regenerate_password",
     "set-password": "set_password",
+    "set-username": "set_username",
     "get-qr": "get_qr",
 }
 
@@ -79,6 +81,10 @@ def main(argv):
         if len(argv) < 2:
             sys.exit("set-password needs a password")
         params["password"] = argv[1]
+    elif method == "set_username":
+        if len(argv) < 2:
+            sys.exit("set-username needs a username")
+        params["username"] = argv[1]
 
     request = {
         "type": "request",

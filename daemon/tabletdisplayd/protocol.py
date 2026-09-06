@@ -20,6 +20,7 @@ METHOD_SET_DISPLAY_MODE = "set_display_mode"
 METHOD_SET_ENCRYPTION = "set_encryption"
 METHOD_REGENERATE_PASSWORD = "regenerate_password"
 METHOD_SET_PASSWORD = "set_password"
+METHOD_SET_USERNAME = "set_username"
 
 EVENT_STATUS = "status"
 
@@ -35,6 +36,7 @@ KNOWN_METHODS = {
     METHOD_SET_ENCRYPTION,
     METHOD_REGENERATE_PASSWORD,
     METHOD_SET_PASSWORD,
+    METHOD_SET_USERNAME,
 }
 
 

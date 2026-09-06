@@ -102,8 +102,9 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    centerOnBar: true
-    contentWidth: popup.fittedContentWidth(Style.space(320))
+    // Anchored under the bar icon (KeyboardPanel's default), not centered
+    // on the screen -- matches every other plugin's panel on this bar.
+    contentWidth: popup.fittedContentWidth(Style.space(360))
     contentHeight: popup.fittedContentHeight(content.implicitHeight, Style.space(620))
 
     // The panel grew past a fixed height once encryption/position/mode
@@ -260,6 +261,7 @@ Panel {
               width: parent.width
               visible: root.resolutionLine() !== ""
               text: root.resolutionLine()
+              wrapMode: Text.WordWrap
               textFormat: Text.PlainText
               color: Qt.darker(root.foreground, 1.4)
               font.family: root.fontFamily
@@ -280,7 +282,7 @@ Panel {
         Dropdown {
           visible: !root.mirroring
           width: parent.width
-          label: "Resolution preset (overrides auto-detect)"
+          label: "Resolution preset"
           value: root.selectedPresetId
           options: root.presetOptions
           foreground: root.foreground
@@ -308,7 +310,7 @@ Panel {
       Dropdown {
         visible: !root.mirroring
         width: parent.width
-        label: "Position relative to main screen"
+        label: "Position"
         value: root.status.position || "auto-right"
         options: root.positionOptions
         foreground: root.foreground
@@ -344,6 +346,7 @@ Panel {
           Text {
             width: parent.width
             text: "VNC username / password (enter these on the tablet)"
+            wrapMode: Text.WordWrap
             textFormat: Text.PlainText
             color: Qt.darker(root.foreground, 1.4)
             font.family: root.fontFamily
@@ -363,8 +366,41 @@ Panel {
             width: parent.width
             spacing: Style.spacing.md
 
+            TextField {
+              id: customUsernameField
+              width: parent.width - setUsernameButton.width - parent.spacing
+              placeholderText: "Or choose your own username…"
+              foreground: root.foreground
+              accent: Color.accent
+              onAccepted: setUsernameButton.clicked()
+            }
+
+            Button {
+              id: setUsernameButton
+              text: "Set"
+              bordered: true
+              enabled: customUsernameField.text.length > 0
+              foreground: root.foreground
+              background: root.background
+              onClicked: {
+                hostWidget.setUsername(customUsernameField.text)
+                customUsernameField.text = ""
+              }
+            }
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.spacing.md
+
             Text {
+              // Reserves space for the button explicitly (a plain Row
+              // does not shrink children to fit) and wraps rather than
+              // eliding -- unlike a label, truncating characters out of a
+              // password shown for the user to copy would be misleading.
+              width: parent.width - regenerateButton.width - parent.spacing
               text: root.status.vnc_password || ""
+              wrapMode: Text.WrapAnywhere
               textFormat: Text.PlainText
               color: root.foreground
               font.family: root.fontFamily
@@ -373,6 +409,7 @@ Panel {
             }
 
             Button {
+              id: regenerateButton
               text: "Regenerate"
               iconText: "󰑐"
               bordered: true

@@ -55,11 +55,12 @@ class SetupServerTestCase(unittest.TestCase):
         self.assertNotIn("__VNC_PORT__", body)
 
     def test_setup_page_shows_username_and_password_when_encrypted(self):
-        from tabletdisplayd import config, netinfo
+        from tabletdisplayd import netinfo
 
         secure = SetupServer(
             "127.0.0.1", netinfo.free_tcp_port(), PAGE_PATH, vnc_port=5900,
-            on_report=lambda w, h, d: None, vnc_password="Ab3dEfGh9k",
+            on_report=lambda w, h, d: None,
+            vnc_username="someone", vnc_password="Ab3dEfGh9k",
         )
         secure.start()
         try:
@@ -69,7 +70,7 @@ class SetupServerTestCase(unittest.TestCase):
             secure.stop()
 
         self.assertIn("Ab3dEfGh9k", body)
-        self.assertIn(config.VNC_USERNAME, body)
+        self.assertIn("someone", body)
         self.assertNotIn("__VNC_PASSWORD__", body)
         self.assertNotIn("__VNC_USERNAME__", body)
 

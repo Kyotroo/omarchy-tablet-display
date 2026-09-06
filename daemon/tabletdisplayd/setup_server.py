@@ -15,7 +15,7 @@ import json
 import sys
 import threading
 
-from . import config, qrcode_gen
+from . import qrcode_gen
 
 MAX_REPORT_BODY = 8192
 
@@ -103,11 +103,12 @@ class _ThreadingHTTPServer(http.server.ThreadingHTTPServer):
 
 class SetupServer:
     def __init__(self, bind_ip: str, port: int, page_path, vnc_port: int, on_report,
-                 vnc_password: str | None = None, logf=None):
+                 vnc_username: str | None = None, vnc_password: str | None = None, logf=None):
         self.bind_ip = bind_ip
         self.port = port
         self.page_path = page_path
         self.vnc_port = vnc_port
+        self.vnc_username = vnc_username
         self.vnc_password = vnc_password
         self._on_report = on_report
         self._logf = logf or (lambda *a, **k: None)
@@ -130,7 +131,7 @@ class SetupServer:
         page_text = self.page_path.read_text(encoding="utf-8")
         page_text = page_text.replace("__VNC_PORT__", str(self.vnc_port))
         page_text = page_text.replace("__VNC_PASSWORD__", self.vnc_password or "")
-        page_text = page_text.replace("__VNC_USERNAME__", config.VNC_USERNAME)
+        page_text = page_text.replace("__VNC_USERNAME__", self.vnc_username or "")
         page_bytes = page_text.encode("utf-8")
         qr_png = qrcode_gen.generate_png(self.url)
         self.qr_png_bytes = qr_png

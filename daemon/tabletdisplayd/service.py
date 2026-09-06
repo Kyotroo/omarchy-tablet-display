@@ -73,6 +73,7 @@ class Service:
         self.position = settings.get("position", config.DEFAULT_POSITION)
         self.display_mode = settings.get("display_mode", config.DEFAULT_DISPLAY_MODE)
         self.encryption_enabled = settings.get("encryption_enabled", config.DEFAULT_ENCRYPTION_ENABLED)
+        self.vnc_username = settings.get("vnc_username", config.DEFAULT_VNC_USERNAME)
         # Generated lazily on first enable (see set_encryption), not here:
         # a fresh password every time nothing has ever asked for one would
         # mean generating one on every single daemon start for no reason.
@@ -98,6 +99,7 @@ class Service:
             "position": self.position,
             "display_mode": self.display_mode,
             "encryption_enabled": self.encryption_enabled,
+            "vnc_username": self.vnc_username,
             "vnc_password": self.vnc_password,
         }))
         path.chmod(0o600)  # holds vnc_password once encryption has ever been enabled
@@ -194,7 +196,7 @@ class Service:
             "display_mode": self.display_mode,
             "mirror_source": self.mirror_source,
             "encryption_enabled": self.encryption_enabled,
-            "vnc_username": config.VNC_USERNAME if self.encryption_enabled else None,
+            "vnc_username": self.vnc_username if self.encryption_enabled else None,
             "vnc_password": self.vnc_password if self.encryption_enabled else None,
             "client_connected": client_connected,
             "last_error": self.last_error,
@@ -266,6 +268,7 @@ class Service:
                 setup_server = SetupServer(bind_ip, setup_port, self.setup_page_path,
                                             vnc_port=vnc_port,
                                             on_report=self._handle_client_report,
+                                            vnc_username=self.vnc_username if self.encryption_enabled else None,
                                             vnc_password=self.vnc_password if self.encryption_enabled else None,
                                             logf=self._logf)
                 setup_server.start()
@@ -322,7 +325,8 @@ class Service:
         key_path = tls_dir / "key.pem"
         security.ensure_cert(cert_path, key_path)
         wayvnc_config_path = tls_dir / "wayvnc-secure.conf"
-        security.write_wayvnc_config(wayvnc_config_path, cert_path, key_path, self.vnc_password)
+        security.write_wayvnc_config(wayvnc_config_path, cert_path, key_path,
+                                      self.vnc_username, self.vnc_password)
         return str(wayvnc_config_path)
 
     def _handle_client_report(self, css_width: int, css_height: int, dpr: float) -> None:
@@ -493,6 +497,29 @@ class Service:
             except security.SecurityError as exc:
                 raise ServiceError(str(exc)) from exc
             return self._apply_new_password(password)
+
+    def set_username(self, username: str) -> dict:
+        """Sets the VNC username. Applies live the same way set_password does:
+        wayvnc has no runtime toggle for its own auth settings, so a running
+        session is restarted with the new config."""
+        with self._lock:
+            try:
+                security.validate_username(username)
+            except security.SecurityError as exc:
+                raise ServiceError(str(exc)) from exc
+            self.vnc_username = username
+            self._save_settings()
+
+            if self.state == STATE_RUNNING and self.encryption_enabled:
+                prior_width, prior_height, prior_refresh = self.width, self.height, self.refresh
+                self.stop()
+                status = self.start(width=prior_width, height=prior_height, refresh=prior_refresh)
+                if status["state"] == STATE_ERROR:
+                    raise ServiceError(status["last_error"] or "failed to apply new username")
+                return status
+
+            self._notify()
+            return self._status_locked()
 
     def _apply_new_password(self, password: str) -> dict:
         """Common tail for regenerate_password/set_password: persist, and
