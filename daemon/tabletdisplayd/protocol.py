@@ -17,6 +17,8 @@ METHOD_SET_RESOLUTION = "set_resolution"
 METHOD_GET_QR = "get_qr"
 METHOD_SET_POSITION = "set_position"
 METHOD_SET_DISPLAY_MODE = "set_display_mode"
+METHOD_SET_ENCRYPTION = "set_encryption"
+METHOD_REGENERATE_PASSWORD = "regenerate_password"
 
 EVENT_STATUS = "status"
 
@@ -29,6 +31,8 @@ KNOWN_METHODS = {
     METHOD_GET_QR,
     METHOD_SET_POSITION,
     METHOD_SET_DISPLAY_MODE,
+    METHOD_SET_ENCRYPTION,
+    METHOD_REGENERATE_PASSWORD,
 }
 
 

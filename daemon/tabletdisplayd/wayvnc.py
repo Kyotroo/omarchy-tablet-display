@@ -27,11 +27,12 @@ class WayvncError(RuntimeError):
 
 class WayvncSupervisor:
     def __init__(self, output_name: str, bind_ip: str, port: int, control_socket: str,
-                 logf=None):
+                 logf=None, config_path: str | None = None):
         self.output_name = output_name
         self.bind_ip = bind_ip
         self.port = port
         self.control_socket = control_socket
+        self.config_path = config_path
         self._logf = logf or (lambda *a, **k: None)
 
         self._proc: subprocess.Popen | None = None
@@ -83,13 +84,12 @@ class WayvncSupervisor:
 
     def _spawn_locked(self) -> None:
         address = f"{self.bind_ip}:{self.port}"
+        command = [WAYVNC, "--output", self.output_name, "--socket", self.control_socket]
+        if self.config_path:
+            command += ["--config", self.config_path]
+        command.append(address)
         self._proc = subprocess.Popen(
-            [
-                WAYVNC,
-                "--output", self.output_name,
-                "--socket", self.control_socket,
-                address,
-            ],
+            command,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )

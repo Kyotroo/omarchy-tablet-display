@@ -102,11 +102,13 @@ class _ThreadingHTTPServer(http.server.ThreadingHTTPServer):
 
 
 class SetupServer:
-    def __init__(self, bind_ip: str, port: int, page_path, vnc_port: int, on_report, logf=None):
+    def __init__(self, bind_ip: str, port: int, page_path, vnc_port: int, on_report,
+                 vnc_password: str | None = None, logf=None):
         self.bind_ip = bind_ip
         self.port = port
         self.page_path = page_path
         self.vnc_port = vnc_port
+        self.vnc_password = vnc_password
         self._on_report = on_report
         self._logf = logf or (lambda *a, **k: None)
         self._server: _ThreadingHTTPServer | None = None
@@ -127,6 +129,7 @@ class SetupServer:
         # at serve time rather than templated ahead of time.
         page_text = self.page_path.read_text(encoding="utf-8")
         page_text = page_text.replace("__VNC_PORT__", str(self.vnc_port))
+        page_text = page_text.replace("__VNC_PASSWORD__", self.vnc_password or "")
         page_bytes = page_text.encode("utf-8")
         qr_png = qrcode_gen.generate_png(self.url)
         self.qr_png_bytes = qr_png

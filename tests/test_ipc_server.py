@@ -77,6 +77,19 @@ class DispatchTestCase(unittest.TestCase):
         self.assertNotIn("error", response)
         self.assertEqual(response["result"]["position"], "auto-up")
 
+    def test_set_encryption_missing_params_is_invalid_params_error(self):
+        response, _ = self.server.dispatch(request(protocol.METHOD_SET_ENCRYPTION, {}))
+        self.assertEqual(response["error"]["code"], "invalid_params")
+
+    def test_set_encryption_while_stopped_succeeds(self):
+        response, _ = self.server.dispatch(request(protocol.METHOD_SET_ENCRYPTION, {"enabled": True}))
+        self.assertNotIn("error", response)
+        self.assertTrue(response["result"]["encryption_enabled"])
+
+    def test_regenerate_password_while_stopped_succeeds(self):
+        response, _ = self.server.dispatch(request(protocol.METHOD_REGENERATE_PASSWORD))
+        self.assertNotIn("error", response)
+
     def test_set_resolution_missing_params_is_invalid_params_error(self):
         response, _ = self.server.dispatch(request(protocol.METHOD_SET_RESOLUTION, {}))
         self.assertEqual(response["error"]["code"], "invalid_params")

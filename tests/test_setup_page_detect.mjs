@@ -39,11 +39,12 @@ function makeElement(id) {
   };
 }
 
-function runPage({ userAgent, userAgentData, platform, maxTouchPoints, vncPort }) {
+function runPage({ userAgent, userAgentData, platform, maxTouchPoints, vncPort, vncPassword }) {
   const elements = {};
   for (const id of [
     "reportStatus", "connectButton", "connectLabel", "storeStep",
     "storeStepLabel", "storeLinks", "manualAddress",
+    "passwordBlock", "manualPassword",
   ]) {
     elements[id] = makeElement(id);
   }
@@ -71,7 +72,9 @@ function runPage({ userAgent, userAgentData, platform, maxTouchPoints, vncPort }
   sandbox.screen = sandbox.window.screen;
   sandbox.devicePixelRatio = sandbox.window.devicePixelRatio;
 
-  const patched = scriptBody.replace(/__VNC_PORT__/, String(vncPort ?? 5900));
+  const patched = scriptBody
+    .replace(/__VNC_PORT__/, String(vncPort ?? 5900))
+    .replace(/__VNC_PASSWORD__/, vncPassword ?? "");
   vm.createContext(sandbox);
   vm.runInContext(patched, sandbox);
   return elements;
@@ -123,4 +126,24 @@ function runPage({ userAgent, userAgentData, platform, maxTouchPoints, vncPort }
   assert.equal(els.storeLinks.children.length, 3, "all three stores when detection can't tell");
 }
 
-console.log("PASS: setup page platform detection (4 scenarios)");
+// -- password shown only when the session is actually encrypted -----------
+{
+  const els = runPage({
+    userAgent: "Mozilla/5.0 (Linux; Android 14; SM-X620) AppleWebKit/537.36 Chrome/128.0 Mobile Safari/537.36",
+    userAgentData: undefined,
+    platform: "Linux armv8l",
+    vncPassword: "Ab3dEfGh9k",
+  });
+  assert.equal(els.passwordBlock.hidden, false);
+  assert.equal(els.manualPassword.textContent, "Ab3dEfGh9k");
+}
+{
+  const els = runPage({
+    userAgent: "Mozilla/5.0 (Linux; Android 14; SM-X620) AppleWebKit/537.36 Chrome/128.0 Mobile Safari/537.36",
+    userAgentData: undefined,
+    platform: "Linux armv8l",
+  });
+  assert.equal(els.passwordBlock.hidden, true, "must stay hidden for an unencrypted session");
+}
+
+console.log("PASS: setup page platform detection (6 scenarios)");

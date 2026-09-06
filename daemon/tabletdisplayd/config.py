@@ -20,16 +20,19 @@ DEFAULT_VNC_PORT = 5900
 DEFAULT_SETUP_PORT = 5810
 DEFAULT_POSITION = "auto-right"
 DEFAULT_DISPLAY_MODE = "extend"
+DEFAULT_ENCRYPTION_ENABLED = False
 
 # Hyprland's own vocabulary for hl.monitor()'s `position`, confirmed live
 # (each places the new output relative to whatever else is already placed).
 VALID_POSITIONS = ("auto-left", "auto-right", "auto-up", "auto-down")
 
-# "extend": an independent output with its own workspace(s), same as any
-# real second monitor in Hyprland -- there is no separate "extend" distinct
-# from this; every monitor already gets its own workspace.
-# "mirror": clones another output's pixels via hl.monitor's `mirror` field;
-# the mirrored output gets no workspace of its own.
+# "extend": an independent headless output this daemon creates and owns,
+# with its own workspace(s), same as any real second monitor in Hyprland --
+# there is no separate "extend" distinct from this; every monitor already
+# gets its own workspace.
+# "mirror": wayvnc captures the currently-focused real monitor directly, no
+# headless output involved at all -- confirmed live that a Hyprland
+# `mirror` output has no independent Wayland surface wayvnc can bind to.
 VALID_DISPLAY_MODES = ("extend", "mirror")
 
 

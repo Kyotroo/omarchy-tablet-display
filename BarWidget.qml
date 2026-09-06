@@ -19,8 +19,9 @@ BarWidget {
     state: "stopped", output_name: null, bind_ip: null, vnc_port: null,
     setup_port: null, setup_url: null, qr_url: null, width: null,
     height: null, refresh: null, scale: null, position: "auto-right",
-    display_mode: "extend", mirror_source: null, client_connected: false,
-    last_error: null,
+    display_mode: "extend", mirror_source: null,
+    encryption_enabled: false, vnc_password: null,
+    client_connected: false, last_error: null,
   })
   property var status: offlineStatus
   readonly property bool daemonReachable: !!backendSocket && backendSocket.connected
@@ -73,6 +74,8 @@ BarWidget {
   }
   function setPosition(position) { _send("set_position", { position: position }) }
   function setDisplayMode(mode) { _send("set_display_mode", { mode: mode }) }
+  function setEncryption(enabled) { _send("set_encryption", { enabled: enabled }) }
+  function regeneratePassword() { _send("regenerate_password", {}) }
   function requestQr() { _send("get_qr", {}) }
 
   function _applyStatus(newStatus) {

@@ -117,6 +117,10 @@
       <code class="address" id="manualAddress">detecting&hellip;</code>
       <p class="hint">Open your VNC app and connect to this address if the button above
         doesn't work.</p>
+      <div id="passwordBlock" hidden>
+        <h2 style="margin-top: 14px;">Password</h2>
+        <code class="address" id="manualPassword"></code>
+      </div>
     </div>
   </div>
 </main>
@@ -136,6 +140,16 @@
   var storeStepLabel = document.getElementById("storeStepLabel");
   var storeLinks = document.getElementById("storeLinks");
   var manualAddress = document.getElementById("manualAddress");
+  var passwordBlock = document.getElementById("passwordBlock");
+  var manualPassword = document.getElementById("manualPassword");
+
+  // Substituted at serve time, same as the port constant above -- empty
+  // when the session isn't password-protected.
+  var VNC_PASSWORD = "__VNC_PASSWORD__";
+  if (VNC_PASSWORD) {
+    manualPassword.textContent = VNC_PASSWORD;
+    passwordBlock.hidden = false;
+  }
 
   // The server that served this page is the only address a same-origin
   // fetch can reach -- also the address the VNC session listens on.

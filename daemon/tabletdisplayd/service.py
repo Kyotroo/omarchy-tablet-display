@@ -14,7 +14,7 @@ import json
 import threading
 import time
 
-from . import config, hypr, netinfo
+from . import config, hypr, netinfo, security
 from .setup_server import SetupServer
 from .wayvnc import WayvncSupervisor, WayvncError
 
@@ -72,6 +72,11 @@ class Service:
         settings = self._load_settings()
         self.position = settings.get("position", config.DEFAULT_POSITION)
         self.display_mode = settings.get("display_mode", config.DEFAULT_DISPLAY_MODE)
+        self.encryption_enabled = settings.get("encryption_enabled", config.DEFAULT_ENCRYPTION_ENABLED)
+        # Generated lazily on first enable (see set_encryption), not here:
+        # a fresh password every time nothing has ever asked for one would
+        # mean generating one on every single daemon start for no reason.
+        self.vnc_password = settings.get("vnc_password")
         self.mirror_source = None
 
     def set_notifier(self, on_change) -> None:
@@ -88,10 +93,14 @@ class Service:
 
     def _save_settings(self) -> None:
         self.state_dir.mkdir(parents=True, exist_ok=True)
-        self._settings_file().write_text(json.dumps({
+        path = self._settings_file()
+        path.write_text(json.dumps({
             "position": self.position,
             "display_mode": self.display_mode,
+            "encryption_enabled": self.encryption_enabled,
+            "vnc_password": self.vnc_password,
         }))
+        path.chmod(0o600)  # holds vnc_password once encryption has ever been enabled
 
     def _session_file(self):
         return self.state_dir / "session.json"
@@ -184,6 +193,8 @@ class Service:
             "position": self.position,
             "display_mode": self.display_mode,
             "mirror_source": self.mirror_source,
+            "encryption_enabled": self.encryption_enabled,
+            "vnc_password": self.vnc_password if self.encryption_enabled else None,
             "client_connected": client_connected,
             "last_error": self.last_error,
         }
@@ -244,18 +255,21 @@ class Service:
                     scale_applied = 1.0
                     mirror_source = None
 
+                wayvnc_config_path = self._prepare_wayvnc_config() if self.encryption_enabled else None
+
                 control_socket = str(self.runtime_dir / f"{config.SERVICE_NAME}-wayvnc.sock")
                 supervisor = WayvncSupervisor(output_name, bind_ip, vnc_port, control_socket,
-                                               logf=self._logf)
+                                               logf=self._logf, config_path=wayvnc_config_path)
                 supervisor.start(on_death=self._notify)
 
                 setup_server = SetupServer(bind_ip, setup_port, self.setup_page_path,
                                             vnc_port=vnc_port,
                                             on_report=self._handle_client_report,
+                                            vnc_password=self.vnc_password if self.encryption_enabled else None,
                                             logf=self._logf)
                 setup_server.start()
             except (hypr.HyprctlError, WayvncError, netinfo.NoLanAddressError,
-                    OSError) as exc:
+                    security.SecurityError, OSError) as exc:
                 if supervisor is not None:
                     supervisor.stop()
                 if output_name is not None and owns_output:
@@ -286,6 +300,29 @@ class Service:
             self._write_session_file()
             self._notify()
             return self._status_locked()
+
+    def _prepare_wayvnc_config(self) -> str:
+        """Ensures a cert/key/password exist and returns the wayvnc config
+        path that turns them on. The cert and password are stable across
+        sessions once generated; only this config file (which just points
+        at them) is written fresh, cheaply, every start.
+
+        Paths are computed from self.state_dir, not config.state_dir()'s
+        environment-derived path -- this Service may have been constructed
+        with an injected state_dir for test isolation, same reason
+        _settings_file()/_session_file() do the same rather than using a
+        config.*_path() helper.
+        """
+        if not self.vnc_password:
+            self.vnc_password = security.generate_password()
+            self._save_settings()
+        tls_dir = self.state_dir / "tls"
+        cert_path = tls_dir / "cert.pem"
+        key_path = tls_dir / "key.pem"
+        security.ensure_cert(cert_path, key_path)
+        wayvnc_config_path = tls_dir / "wayvnc-secure.conf"
+        security.write_wayvnc_config(wayvnc_config_path, cert_path, key_path, self.vnc_password)
+        return str(wayvnc_config_path)
 
     def _handle_client_report(self, css_width: int, css_height: int, dpr: float) -> None:
         """Reconfigure the output from the setup page's reported display metrics.
@@ -409,6 +446,56 @@ class Service:
                 status = self.start(width=prior_width, height=prior_height, refresh=prior_refresh)
                 if status["state"] == STATE_ERROR:
                     raise ServiceError(status["last_error"] or "failed to switch display mode")
+                return status
+
+            self._notify()
+            return self._status_locked()
+
+    def set_encryption(self, enabled: bool) -> dict:
+        with self._lock:
+            was_running = self.state == STATE_RUNNING
+            # wayvnc has no runtime toggle for this -- it is set only via
+            # the config file passed at launch -- so turning it on/off while
+            # a session is live means restarting wayvnc, same as switching
+            # display mode. The VNC client sees a brief disconnect/reconnect.
+            prior_width, prior_height, prior_refresh = self.width, self.height, self.refresh
+
+            self.encryption_enabled = bool(enabled)
+            if self.encryption_enabled and not self.vnc_password:
+                # Generated as soon as the toggle is switched on, not lazily
+                # at the next start: the panel shows this password right
+                # away, and making someone click Start first just to learn
+                # what it is would be a needless extra step.
+                self.vnc_password = security.generate_password()
+            self._save_settings()
+
+            if was_running:
+                self.stop()
+                status = self.start(width=prior_width, height=prior_height, refresh=prior_refresh)
+                if status["state"] == STATE_ERROR:
+                    raise ServiceError(status["last_error"] or "failed to switch encryption")
+                return status
+
+            self._notify()
+            return self._status_locked()
+
+    def regenerate_password(self) -> dict:
+        """Issues a fresh password, invalidating the old one immediately.
+
+        Applies live if a session is running (restarts wayvnc with the new
+        config, same as set_encryption) so a leaked/shared-too-widely
+        password can actually be revoked, not just changed for next time.
+        """
+        with self._lock:
+            self.vnc_password = security.generate_password()
+            self._save_settings()
+
+            if self.state == STATE_RUNNING and self.encryption_enabled:
+                prior_width, prior_height, prior_refresh = self.width, self.height, self.refresh
+                self.stop()
+                status = self.start(width=prior_width, height=prior_height, refresh=prior_refresh)
+                if status["state"] == STATE_ERROR:
+                    raise ServiceError(status["last_error"] or "failed to apply new password")
                 return status
 
             self._notify()

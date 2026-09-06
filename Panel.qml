@@ -16,6 +16,7 @@ Panel {
     state: "stopped", bind_ip: null, vnc_port: null, setup_url: null,
     qr_url: null, width: null, height: null, position: "auto-right",
     display_mode: "extend", mirror_source: null,
+    encryption_enabled: false, vnc_password: null,
     client_connected: false, last_error: null,
   })
   readonly property bool daemonReachable: hostWidget ? hostWidget.daemonReachable : false
@@ -298,6 +299,77 @@ Panel {
         foreground: root.foreground
         background: root.background
         onChanged: function(value) { hostWidget.setPosition(value) }
+      }
+
+      Toggle {
+        width: parent.width
+        label: "Secure connection (encrypted, password-protected)"
+        checked: root.status.encryption_enabled === true
+        foreground: root.foreground
+        accent: Color.accent
+        onClicked: hostWidget.setEncryption(!checked)
+      }
+
+      BorderSurface {
+        visible: root.status.encryption_enabled === true
+        width: parent.width
+        implicitHeight: passwordColumn.implicitHeight + Style.spacing.lg * 2
+        color: Style.controlFill(false, false, root.foreground, Color.accent)
+        borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
+        radius: Style.cornerRadius
+
+        Column {
+          id: passwordColumn
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          anchors.margins: Style.spacing.lg
+          spacing: Style.spacing.sm
+
+          Text {
+            width: parent.width
+            text: "VNC password (enter this on the tablet)"
+            textFormat: Text.PlainText
+            color: Qt.darker(root.foreground, 1.4)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.spacing.md
+
+            Text {
+              text: root.status.vnc_password || ""
+              textFormat: Text.PlainText
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.heading
+              font.bold: true
+            }
+
+            Button {
+              text: "Regenerate"
+              iconText: "󰑐"
+              bordered: true
+              foreground: root.foreground
+              background: root.background
+              onClicked: hostWidget.regeneratePassword()
+            }
+          }
+
+          Text {
+            width: parent.width
+            text: "The tablet's browser also shows this on the setup page. " +
+              "Also shown here since you may already be past that step."
+            wrapMode: Text.WordWrap
+            textFormat: Text.PlainText
+            color: Qt.darker(root.foreground, 1.5)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+        }
       }
 
       Button {

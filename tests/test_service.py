@@ -369,6 +369,118 @@ class ServiceTestCase(unittest.TestCase):
 
         self.assertEqual(self.hypr_state(), before, "recovery must never remove/alter a real monitor")
 
+    # -- encryption ------------------------------------------------------------
+
+    def test_encryption_disabled_by_default(self):
+        svc = self.make_service()
+        status = svc.start()
+        self.assertFalse(status["encryption_enabled"])
+        self.assertIsNone(status["vnc_password"])
+        spawns = [l for l in self.log_lines() if l.startswith("wayvnc ")]
+        self.assertTrue(spawns)
+        self.assertNotIn("--config", spawns[0])
+
+    def test_enabling_encryption_generates_password_and_cert_and_passes_config(self):
+        svc = self.make_service()
+        svc.set_encryption(True)
+        status = svc.start()
+
+        self.assertTrue(status["encryption_enabled"])
+        self.assertIsNotNone(status["vnc_password"])
+        self.assertEqual(len(status["vnc_password"]), 10)
+
+        tls_dir = self.state_dir / "tls"
+        self.assertTrue((tls_dir / "cert.pem").exists())
+        self.assertTrue((tls_dir / "key.pem").exists())
+        self.assertTrue((tls_dir / "wayvnc-secure.conf").exists())
+
+        self._wait_for(lambda: any(
+            "--config" in l for l in self.log_lines() if l.startswith("wayvnc ")
+        ))
+
+    def test_password_persists_across_stop_start_and_daemon_restart(self):
+        svc = self.make_service()
+        svc.set_encryption(True)
+        first_password = svc.vnc_password
+        svc.start()
+        svc.stop()
+        self.assertEqual(svc.vnc_password, first_password)
+
+        reloaded = self.make_service()
+        self.assertTrue(reloaded.encryption_enabled)
+        self.assertEqual(reloaded.vnc_password, first_password)
+
+    def test_password_not_regenerated_on_every_start(self):
+        svc = self.make_service()
+        svc.set_encryption(True)
+        first = svc.vnc_password
+        svc.start()
+        svc.stop()
+        svc.start()
+        self.assertEqual(svc.vnc_password, first)
+
+    def test_regenerate_password_changes_it(self):
+        svc = self.make_service()
+        svc.set_encryption(True)
+        first = svc.vnc_password
+        svc.regenerate_password()
+        self.assertNotEqual(svc.vnc_password, first)
+        self.assertIsNotNone(svc.vnc_password)
+
+    def test_regenerate_password_while_running_restarts_wayvnc_with_new_config(self):
+        svc = self.make_service()
+        svc.set_encryption(True)
+        svc.start()
+
+        status = svc.regenerate_password()
+
+        # A fresh headless output is expected here (extend mode's counter
+        # is never reused within a session, same as any other stop/start
+        # cycle) -- what matters is that it is still a valid running
+        # extend-mode session using the new password, not the same name.
+        self.assertEqual(status["state"], STATE_RUNNING)
+        self.assertEqual(status["display_mode"], "extend")
+        config_text = (self.state_dir / "tls" / "wayvnc-secure.conf").read_text()
+        self.assertIn(f"password={svc.vnc_password}", config_text)
+
+    def test_set_encryption_while_running_does_a_clean_restart(self):
+        svc = self.make_service()
+        svc.start()
+        self.assertFalse(svc.encryption_enabled)
+
+        status = svc.set_encryption(True)
+
+        self.assertEqual(status["state"], STATE_RUNNING)
+        self.assertTrue(status["encryption_enabled"])
+        self._wait_for(lambda: any(
+            "--config" in l for l in self.log_lines() if l.startswith("wayvnc ")
+        ))
+
+    def test_disabling_encryption_while_running_drops_the_config_flag(self):
+        svc = self.make_service()
+        svc.set_encryption(True)
+        svc.start()
+        self._wait_for(lambda: any(
+            "--config" in l for l in self.log_lines() if l.startswith("wayvnc ")
+        ))
+
+        svc.set_encryption(False)
+
+        def latest_spawn_has_no_config():
+            spawns = [l for l in self.log_lines() if l.startswith("wayvnc ")]
+            return bool(spawns) and "--config" not in spawns[-1]
+
+        self._wait_for(latest_spawn_has_no_config)
+
+    def test_encryption_setting_hidden_from_status_when_disabled(self):
+        svc = self.make_service()
+        svc.set_encryption(True)
+        svc.set_encryption(False)
+        # The password is retained internally (so re-enabling doesn't
+        # silently rotate it) but must not be advertised while turned off.
+        self.assertIsNotNone(svc.vnc_password)
+        self.assertIsNone(svc.status()["vnc_password"])
+
     # -- crash / recovery ----------------------------------------------------
 
     def test_wayvnc_respawns_after_unexpected_exit(self):
