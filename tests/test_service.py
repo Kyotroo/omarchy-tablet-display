@@ -221,59 +221,81 @@ class ServiceTestCase(unittest.TestCase):
         self.assertEqual(self.log_lines(), [], "no hyprctl calls while stopped")
 
     # -- display mode: extend vs mirror ---------------------------------------
+    #
+    # Mirror mode does NOT create a headless output at all: `wayvnc -v`
+    # confirmed live that a Hyprland `mirror` output is never listed as a
+    # capturable target (it is a hardware/DRM-level clone with no
+    # independent Wayland surface), so wayvnc has nothing to bind to if we
+    # created one. Duplicating the screen means pointing wayvnc straight at
+    # the real, already-existing focused monitor -- no hyprctl mutation at
+    # all, since the real monitor's own config must never be touched by
+    # this plugin (touching it is what output_name owns_output guards).
 
     def test_default_display_mode_is_extend(self):
         svc = self.make_service()
         status = svc.start()
         self.assertEqual(status["display_mode"], "extend")
         self.assertIsNone(status["mirror_source"])
-        monitor = next(m for m in self.hypr_state()["monitors"] if m["name"] == "HEADLESS-1")
-        self.assertIsNone(monitor.get("mirrorOf"))
+        self.assertEqual(status["output_name"], "HEADLESS-1")
 
-    def test_start_in_mirror_mode_mirrors_the_focused_monitor(self):
+    def test_start_in_mirror_mode_captures_the_focused_monitor_directly(self):
         svc = self.make_service()
         svc.set_display_mode("mirror")
+        before = self.hypr_state()
         status = svc.start()
 
         self.assertEqual(status["state"], STATE_RUNNING)
+        self.assertEqual(status["output_name"], "eDP-1")
         self.assertEqual(status["mirror_source"], "eDP-1")
-        # Hyprland forces the mirrored output to the source's own
-        # resolution -- confirmed live -- not whatever default width/height
-        # this daemon would otherwise have asked for.
+        # The real monitor's own resolution, read back -- not a headless
+        # output forced to match it.
         self.assertEqual((status["width"], status["height"]), (2880, 1800))
-        monitor = next(m for m in self.hypr_state()["monitors"] if m["name"] == "HEADLESS-1")
-        self.assertEqual(monitor["mirrorOf"], "eDP-1")
+        # No hyprctl mutation at all: no headless output created, and the
+        # real monitor's own config is completely untouched.
+        self.assertEqual(self.hypr_state(), before)
+        creates = [l for l in self.log_lines() if l.startswith("hyprctl output create")]
+        self.assertEqual(creates, [])
 
     def test_mirror_mode_persists_and_applies_on_next_start(self):
         svc = self.make_service()
-        svc.set_position("auto-left")  # a stopped no-op reapply, sets a baseline
         svc.set_display_mode("mirror")
-        svc.stop()
+        svc.stop()  # a no-op: mirror mode was never started, nothing to tear down
 
         reloaded = self.make_service()
         self.assertEqual(reloaded.display_mode, "mirror")
         status = reloaded.start()
         self.assertEqual(status["mirror_source"], "eDP-1")
 
-    def test_switching_to_mirror_while_running_reapplies_immediately(self):
+    def test_switching_to_mirror_while_running_does_a_clean_stop_start(self):
         svc = self.make_service()
         svc.start()
-        status = svc.set_display_mode("mirror")
-        self.assertEqual(status["mirror_source"], "eDP-1")
-        monitor = next(m for m in self.hypr_state()["monitors"] if m["name"] == "HEADLESS-1")
-        self.assertEqual(monitor["mirrorOf"], "eDP-1")
+        headless_name = svc.output_name
+        self.assertTrue(svc._owns_output)
 
-    def test_switching_back_to_extend_clears_the_mirror(self):
+        status = svc.set_display_mode("mirror")
+
+        self.assertEqual(status["mirror_source"], "eDP-1")
+        self.assertEqual(status["output_name"], "eDP-1")
+        self.assertFalse(svc._owns_output)
+        # The extend-mode headless output was torn down as part of the
+        # switch, not leaked.
+        self.assertNotIn(headless_name, hypr.monitor_names())
+
+    def test_switching_back_to_extend_creates_a_fresh_headless_output(self):
         svc = self.make_service()
         svc.set_display_mode("mirror")
         svc.start()
-        svc.set_display_mode("extend")
+        self.assertEqual(svc.output_name, "eDP-1")
 
-        status = svc.status()
+        status = svc.set_display_mode("extend")
+
         self.assertEqual(status["display_mode"], "extend")
         self.assertIsNone(status["mirror_source"])
-        monitor = next(m for m in self.hypr_state()["monitors"] if m["name"] == "HEADLESS-1")
-        self.assertIsNone(monitor.get("mirrorOf"), "mirror=\"none\" must be sent explicitly, not omitted")
+        self.assertTrue(svc._owns_output)
+        self.assertNotEqual(status["output_name"], "eDP-1")
+        # eDP-1 itself was never mutated at any point.
+        edp = next(m for m in self.hypr_state()["monitors"] if m["name"] == "eDP-1")
+        self.assertNotIn("mirrorOf", edp)
 
     def test_set_display_mode_rejects_invalid_value(self):
         svc = self.make_service()
@@ -292,7 +314,6 @@ class ServiceTestCase(unittest.TestCase):
 
         self.assertEqual(status["state"], STATE_ERROR)
         self.assertIsNotNone(status["last_error"])
-        # No orphaned headless output left behind by the failed attempt.
         self.assertEqual(self.hypr_state()["monitors"], state["monitors"])
 
     def test_set_resolution_rejected_while_mirroring(self):
@@ -307,20 +328,46 @@ class ServiceTestCase(unittest.TestCase):
         svc.set_display_mode("mirror")
         svc.start()
         svc._handle_client_report(1280, 800, 2.0)  # must not raise
-        # Resolution stays whatever the mirror forced, not the reported size.
+        # Resolution stays the real monitor's own, not the reported size --
+        # and definitely does not touch the real monitor's own config.
         self.assertEqual((svc.width, svc.height), (2880, 1800))
 
     def test_set_position_while_mirroring_only_persists(self):
         svc = self.make_service()
         svc.set_display_mode("mirror")
         svc.start()
-        self.hypr_state_path.write_text(json.dumps(self.hypr_state()))  # snapshot
         before = self.hypr_state()
 
         svc.set_position("auto-up")
 
         self.assertEqual(svc.position, "auto-up")
-        self.assertEqual(self.hypr_state(), before, "must not touch hyprctl (would break the mirror)")
+        self.assertEqual(self.hypr_state(), before, "must never touch the real monitor being captured")
+
+    def test_stop_after_mirroring_never_touches_the_real_monitor(self):
+        svc = self.make_service()
+        svc.set_display_mode("mirror")
+        svc.start()
+        before = self.hypr_state()
+
+        svc.stop()
+
+        self.assertEqual(self.hypr_state(), before, "eDP-1 must survive untouched -- it is not ours to remove")
+        self.assertEqual(self.log_lines(), [
+            l for l in self.log_lines() if not l.startswith("hyprctl output remove")
+        ], "must never call `output remove` on a real monitor")
+
+    def test_recover_from_previous_mirror_session_never_touches_real_monitor(self):
+        svc = self.make_service()
+        svc.set_display_mode("mirror")
+        svc.start()
+        self.assertEqual(svc.output_name, "eDP-1")
+        before = self.hypr_state()
+        self._services.remove(svc)  # simulate a crash: no clean stop()
+
+        recovered = self.make_service()
+        recovered.recover_from_previous_run()
+
+        self.assertEqual(self.hypr_state(), before, "recovery must never remove/alter a real monitor")
 
     # -- crash / recovery ----------------------------------------------------
 

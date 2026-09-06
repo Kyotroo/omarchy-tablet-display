@@ -115,33 +115,6 @@ def set_monitor_mode(name: str, width: int, height: int, refresh: float | None =
     _run(["eval", lua])
 
 
-def set_monitor_mirror(name: str, source: str, width: int, height: int,
-                        refresh: float | None = None) -> None:
-    """Mirror `source` onto `name` via hl.monitor's `mirror` field.
-
-    `width`/`height` must be the source's own current mode, passed
-    explicitly alongside `mirror` in the same call. Confirmed live this is
-    required: `mirror` alone (omitting `mode`) leaves the target at
-    whatever mode it already had -- e.g. a fresh headless output's default
-    1920x1080 -- instead of the source's actual resolution, even though
-    `mirrorOf` correctly reports the mirror is active either way. Only
-    passing both together produces a true full-resolution mirror.
-
-    Confirmed live: passing `mirror` at all makes it sticky -- a later
-    hl.monitor call that omits the field entirely does NOT clear a mirror
-    already in effect, it just leaves it as-is. `set_monitor_mode` above
-    always passes `mirror="none"` explicitly for exactly this reason: it is
-    the only way back to independent (extend) mode once mirroring has been
-    set, not merely "not asking for mirroring".
-    """
-    mode = f"{width}x{height}"
-    if refresh:
-        mode = f"{mode}@{refresh:g}"
-    lua = (
-        "hl.monitor({output=%s, mode=%s, mirror=%s})"
-        % (json.dumps(name), json.dumps(mode), json.dumps(source))
-    )
-    _run(["eval", lua])
 
 
 def focused_monitor_name() -> str | None:

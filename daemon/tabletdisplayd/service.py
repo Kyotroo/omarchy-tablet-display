@@ -48,6 +48,11 @@ class Service:
         self._lock = threading.RLock()
         self.state = STATE_STOPPED
         self.output_name = None
+        # True when output_name is a headless output this daemon created
+        # (extend mode) and therefore owns and must remove on stop; False
+        # when it is a real physical/existing monitor being captured
+        # in-place (mirror mode) that must never be touched by remove_output.
+        self._owns_output = False
         self.bind_ip = None
         self.width = None
         self.height = None
@@ -95,6 +100,7 @@ class Service:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self._session_file().write_text(json.dumps({
             "output_name": self.output_name,
+            "owns_output": self._owns_output,
             "created_at": time.time(),
         }))
 
@@ -105,7 +111,7 @@ class Service:
             pass
 
     def recover_from_previous_run(self) -> None:
-        """Clean up a headless output left behind by an unclean daemon exit.
+        """Clean up state left behind by an unclean daemon exit.
 
         A daemon restart (crash + systemd Restart=on-failure, or a manual
         `systemctl --user restart`) loses the in-memory WayvncSupervisor, so
@@ -113,11 +119,19 @@ class Service:
         started keeps running as an orphan, bound to a control socket only
         this daemon knows the path of. Recovery here means shutting that
         orphan down via its control socket (the same clean request a live
-        supervisor would send) and then tearing down whatever stale Hyprland
-        output our previous run left active, rather than trying to adopt
-        either -- the headless output carries no user data, so discarding it
-        is always safe, and a fresh `start` from the client rebuilds it in
-        under a second.
+        supervisor would send) and then tearing down whatever stale headless
+        output our previous run created, rather than trying to adopt either.
+
+        Critically: only ever removes the output if the session file says
+        this daemon *owns* it (a headless output it created for extend
+        mode). Mirror mode captures a real physical monitor directly with
+        no headless output at all -- output_name in that case is something
+        like "eDP-1", and calling hyprctl output remove on it would attempt
+        to remove a real monitor, not clean up plugin state. A session file
+        from before this distinction existed has no "owns_output" key, and
+        every one of those was necessarily a headless output (mirror mode
+        used to also create one, just uselessly), so a missing key defaults
+        to True rather than skipping cleanup of genuinely old state.
         """
         session_file = self._session_file()
         try:
@@ -128,14 +142,16 @@ class Service:
         try:
             data = json.loads(raw)
             output_name = data.get("output_name")
+            owns_output = data.get("owns_output", True)
         except (json.JSONDecodeError, AttributeError):
             output_name = None
+            owns_output = False
 
         control_socket = str(self.runtime_dir / f"{config.SERVICE_NAME}-wayvnc.sock")
         if WayvncSupervisor.kill_orphan(control_socket):
             self._logf("recovered from unclean shutdown: stopped orphaned wayvnc")
 
-        if output_name:
+        if output_name and owns_output:
             try:
                 if output_name in hypr.monitor_names():
                     hypr.remove_output(output_name)
@@ -189,6 +205,7 @@ class Service:
             refresh = refresh or self.default_refresh
 
             output_name = None
+            owns_output = False
             supervisor = None
             setup_server = None
             try:
@@ -196,10 +213,36 @@ class Service:
                 vnc_port = netinfo.free_tcp_port(preferred=self.vnc_port_preferred)
                 setup_port = netinfo.free_tcp_port(preferred=self.setup_port_preferred)
 
-                output_name = hypr.create_headless_output()
-                width, height, refresh, scale_applied, mirror_source = self._apply_display_mode(
-                    output_name, width, height, refresh, scale=1.0,
-                )
+                if self.display_mode == "mirror":
+                    # A Hyprland `mirror` output is a hardware/DRM-level
+                    # clone with no independent Wayland surface of its own
+                    # -- confirmed live with `wayvnc -v`, which never lists
+                    # a mirrored headless output as a capturable target at
+                    # all, only real ones. So duplicating the screen means
+                    # pointing wayvnc directly at the real monitor, not
+                    # creating a virtual output and trying to capture that.
+                    source = hypr.focused_monitor_name()
+                    if not source:
+                        raise hypr.HyprctlError("no monitor is currently focused to duplicate")
+                    source_monitor = next(
+                        (m for m in hypr.monitors() if m["name"] == source), None
+                    )
+                    if source_monitor is None:
+                        raise hypr.HyprctlError(f"could not read the mode of monitor {source!r}")
+                    output_name = source
+                    owns_output = False
+                    width = source_monitor["width"]
+                    height = source_monitor["height"]
+                    refresh = source_monitor.get("refreshRate")
+                    scale_applied = source_monitor.get("scale", 1.0)
+                    mirror_source = source
+                else:
+                    output_name = hypr.create_headless_output()
+                    owns_output = True
+                    hypr.set_monitor_mode(output_name, width, height, refresh, scale=1.0,
+                                           position=self.position)
+                    scale_applied = 1.0
+                    mirror_source = None
 
                 control_socket = str(self.runtime_dir / f"{config.SERVICE_NAME}-wayvnc.sock")
                 supervisor = WayvncSupervisor(output_name, bind_ip, vnc_port, control_socket,
@@ -215,7 +258,7 @@ class Service:
                     OSError) as exc:
                 if supervisor is not None:
                     supervisor.stop()
-                if output_name is not None:
+                if output_name is not None and owns_output:
                     try:
                         hypr.remove_output(output_name)
                     except hypr.HyprctlError:
@@ -223,12 +266,14 @@ class Service:
                 self.state = STATE_ERROR
                 self.last_error = str(exc)
                 self.output_name = None
+                self._owns_output = False
                 self._wayvnc = None
                 self._notify()
                 return self._status_locked()
 
             self.state = STATE_RUNNING
             self.output_name = output_name
+            self._owns_output = owns_output
             self.bind_ip = bind_ip
             self.vnc_port = vnc_port
             self.setup_port = setup_port
@@ -241,34 +286,6 @@ class Service:
             self._write_session_file()
             self._notify()
             return self._status_locked()
-
-    def _apply_display_mode(self, output_name, width, height, refresh, scale=1.0):
-        """Applies self.display_mode to `output_name`.
-
-        Returns (width, height, refresh, scale, mirror_source) reflecting
-        what was actually applied -- in mirror mode the source's own
-        current mode is read and passed explicitly (mirror alone, without
-        an explicit matching mode, was confirmed live to leave the target
-        at whatever mode it already had instead of the source's actual
-        resolution), so the caller's width/height/refresh/scale are not
-        trustworthy afterward for status-reporting purposes.
-        """
-        if self.display_mode == "mirror":
-            source = hypr.focused_monitor_name()
-            if not source or source == output_name:
-                raise hypr.HyprctlError("no other monitor is currently focused to mirror")
-            source_monitor = next((m for m in hypr.monitors() if m["name"] == source), None)
-            if source_monitor is None:
-                raise hypr.HyprctlError(f"could not read the mode of monitor {source!r}")
-            src_width = source_monitor["width"]
-            src_height = source_monitor["height"]
-            src_refresh = source_monitor.get("refreshRate")
-            hypr.set_monitor_mirror(output_name, source, src_width, src_height, src_refresh)
-            return src_width, src_height, src_refresh, 1.0, source
-
-        hypr.set_monitor_mode(output_name, width, height, refresh, scale=scale,
-                               position=self.position)
-        return width, height, refresh, scale, None
 
     def _handle_client_report(self, css_width: int, css_height: int, dpr: float) -> None:
         """Reconfigure the output from the setup page's reported display metrics.
@@ -301,7 +318,7 @@ class Service:
             if self._wayvnc is not None:
                 self._wayvnc.stop()
                 self._wayvnc = None
-            if self.output_name is not None:
+            if self.output_name is not None and self._owns_output:
                 try:
                     hypr.remove_output(self.output_name)
                 except hypr.HyprctlError as exc:
@@ -310,6 +327,7 @@ class Service:
             self._clear_session_file()
             self.state = STATE_STOPPED
             self.output_name = None
+            self._owns_output = False
             self.bind_ip = None
             self.vnc_port = None
             self.setup_port = None
@@ -356,12 +374,11 @@ class Service:
                 )
             self.position = position
             self._save_settings()
-            # Position is meaningless while mirroring (the mirrored output
-            # has no position of its own), and reapplying via
-            # set_monitor_mode -- which always writes mirror="none" -- would
-            # break the mirror out from under the user. Persist the
-            # preference either way; it takes effect on the next switch
-            # back to extend mode.
+            # Position is meaningless while mirroring: there is no virtual
+            # output to position at all in that mode (output_name is the
+            # real physical monitor being captured directly), so applying
+            # this would reposition a real monitor. Persist the preference
+            # either way; it takes effect on the next switch to extend mode.
             if self.state == STATE_RUNNING and self.display_mode == "extend":
                 hypr.set_monitor_mode(self.output_name, self.width, self.height, self.refresh,
                                        scale=self.scale, position=position)
@@ -374,21 +391,25 @@ class Service:
                 raise ServiceError(
                     f"invalid display mode {mode!r}, must be one of {config.VALID_DISPLAY_MODES}"
                 )
+            was_running = self.state == STATE_RUNNING
+            # Extend and mirror capture fundamentally different things (a
+            # headless output this daemon owns vs. a real monitor captured
+            # in-place), so there is no in-place reapply between them the
+            # way changing resolution or position has -- a full stop/start
+            # cycle is the only way to switch cleanly. The VNC session
+            # briefly drops and the client reconnects; that is an honest
+            # reflection of what is actually changing, not a shortcut.
+            prior_width, prior_height, prior_refresh = self.width, self.height, self.refresh
+
             self.display_mode = mode
             self._save_settings()
-            if self.state == STATE_RUNNING:
-                try:
-                    width, height, refresh, scale, mirror_source = self._apply_display_mode(
-                        self.output_name,
-                        self.width or self.default_width,
-                        self.height or self.default_height,
-                        self.refresh or self.default_refresh,
-                        scale=self.scale or 1.0,
-                    )
-                except hypr.HyprctlError as exc:
-                    raise ServiceError(str(exc)) from exc
-                self.width, self.height, self.refresh, self.scale, self.mirror_source = (
-                    width, height, refresh, scale, mirror_source,
-                )
+
+            if was_running:
+                self.stop()
+                status = self.start(width=prior_width, height=prior_height, refresh=prior_refresh)
+                if status["state"] == STATE_ERROR:
+                    raise ServiceError(status["last_error"] or "failed to switch display mode")
+                return status
+
             self._notify()
             return self._status_locked()
