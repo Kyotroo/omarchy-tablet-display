@@ -27,6 +27,8 @@ toggle, scan a QR code, connect. No manual Hyprland config, no running
 
 ## Install
 
+![Installing the plugin: one command, then the one-time background service setup](docs/install-clip.gif)
+
 ```bash
 omarchy plugin add https://github.com/Kyotroo/omarchy-tablet-display.git --enable
 ```
@@ -38,6 +40,8 @@ reason this kind of thing silently fails to connect. See
 [Firewall](#firewall) below if you use a different firewall.
 
 ## Quick start
+
+![Opening the panel and scanning the QR code to connect](docs/quick-start.gif)
 
 1. Click the bar icon. The panel opens and a session starts.
 2. Scan the QR code with the tablet (or open the printed address in its
@@ -74,6 +78,8 @@ protocol itself. Some mobile VNC apps offer a "touch vs. trackpad" mode in
 their own settings; most desktop clients don't.
 
 ## Settings
+
+![Changing position and turning on Secure connection](docs/settings.gif)
 
 All of these live in the panel and take effect immediately if a session is
 already running (a brief VNC disconnect/reconnect while the change
