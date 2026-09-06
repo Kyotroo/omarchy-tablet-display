@@ -27,39 +27,46 @@ toggle, scan a QR code, connect. No manual Hyprland config, no running
 
 ## Install
 
-![Installing the plugin: one command, then the one-time background service setup](docs/install-clip.gif)
-
 ```bash
 omarchy plugin add https://github.com/Kyotroo/omarchy-tablet-display.git --enable
 ```
 
-The installer also installs [`wayvnc`](https://github.com/any1/wayvnc) via
-`pacman` if it isn't already on your system — it isn't part of a base
-Omarchy install, and the daemon does the actual screen-sharing through it.
-If `sudo` can't run non-interactively in your setup, it prints the exact
-command to run yourself (`sudo pacman -S wayvnc`) instead of failing
-silently.
-
-The installer also detects `ufw` if present, works out your LAN subnet from
-the system's own default route, and adds a scoped allow rule for the setup
-page and VNC ports (LAN only, never the whole internet) — the single most
-common reason this kind of thing silently fails to connect. See
-[Firewall](#firewall) below if you use a different firewall.
+This only adds the plugin files and shows the bar icon — it's a plain
+`git clone` plus enabling the widget, nothing more. The background
+service isn't installed or running yet; that's a separate one-time step
+below.
 
 ## Quick start
 
-![Opening the panel and scanning the QR code to connect](docs/quick-start.gif)
+![Enabling the plugin, then the one-time background service setup](docs/install-clip.gif)
 
-1. Click the bar icon. The panel opens and a session starts.
-2. Scan the QR code with the tablet (or open the printed address in its
+1. Click the bar icon. The panel opens.
+2. **First time only**: the panel shows a "Set up now" button instead of
+   the usual controls. Click it. This is what actually installs
+   [`wayvnc`](https://github.com/any1/wayvnc) via `pacman` if it isn't
+   already on your system (it isn't part of a base Omarchy install, and
+   the daemon does the actual screen-sharing through it), adds a scoped
+   `ufw` allow rule for your LAN if `ufw` is present (see
+   [Firewall](#firewall) if you use something else), and installs/starts
+   the background service itself. If `sudo` can't run non-interactively
+   in your setup, it prints the exact commands to run yourself instead of
+   failing silently.
+3. Click **Start**.
+
+![Scanning the QR code to connect](docs/quick-start.gif)
+
+4. Scan the QR code with the tablet (or open the printed address in its
    browser).
-3. The page detects the tablet's screen, reports it back, and offers a
+5. The page detects the tablet's screen, reports it back, and offers a
    button to open the address directly in a VNC app — installing one first
    if needed (defaults to [RealVNC
    Viewer](https://www.realvnc.com/en/connect/download/viewer/), available
    free on Android, iOS, Windows, macOS, and Linux).
-4. Click the bar icon again (or the Stop button in the panel) to tear
+6. Click the bar icon again (or the Stop button in the panel) to tear
    everything down cleanly.
+
+Step 2 is one-time — after that, opening the panel goes straight to a
+Start button instead of "Set up now".
 
 ## Using another PC to control this one
 
@@ -153,7 +160,8 @@ bash tests/run.sh
 Runs the full test suite: the daemon's state machine and IPC protocol
 against fake `hyprctl`/`wayvnc`/`ip`/`openssl` fixtures, the embedded setup
 HTTP server, the setup page's platform-detection logic (under a mocked
-DOM, via Node), and the firewall subnet-detection helper.
+DOM, via Node), the firewall subnet-detection helper, and the wayvnc
+dependency check (against fake `pacman`/`sudo` fixtures).
 
 ## License
 
