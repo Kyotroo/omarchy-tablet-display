@@ -88,19 +88,28 @@ def remove_output(name: str) -> None:
         raise
 
 
-def set_monitor_mode(name: str, width: int, height: int, refresh: float | None = None) -> None:
-    """Apply a resolution to an existing output via hl.monitor (Lua config path).
+def set_monitor_mode(name: str, width: int, height: int, refresh: float | None = None,
+                      scale: float = 1.0) -> None:
+    """Apply a resolution (and scale) to an existing output via hl.monitor.
 
     `hyprctl keyword monitor ...` is rejected by this compositor's Lua-based
     config ("keyword can't work with non-legacy parsers"); `hl.monitor` is the
     same call monitors.lua makes at parse time, exposed for runtime use via
     `hyprctl eval`.
+
+    `scale` matters once a real device has reported its devicePixelRatio: the
+    resolution applied at that point is the tablet's *physical* pixel count
+    (CSS `screen.width` * dpr), so setting scale=1 unconditionally would
+    render every UI element at native-pixel size -- illegibly small on a
+    high-DPI tablet panel. Passing the same dpr back as Hyprland's output
+    scale keeps on-screen UI a sensible logical size, the same relationship
+    Omarchy's own monitors.lua uses for a real high-DPI display.
     """
     mode = f"{width}x{height}"
     if refresh:
         mode = f"{mode}@{refresh:g}"
     lua = (
-        "hl.monitor({output=%s, mode=%s, position=\"auto\", scale=1})"
-        % (json.dumps(name), json.dumps(mode))
+        "hl.monitor({output=%s, mode=%s, position=\"auto\", scale=%s})"
+        % (json.dumps(name), json.dumps(mode), json.dumps(round(scale, 3)))
     )
     _run(["eval", lua])

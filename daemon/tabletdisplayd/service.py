@@ -14,6 +14,7 @@ import threading
 import time
 
 from . import config, hypr, netinfo
+from .setup_server import SetupServer
 from .wayvnc import WayvncSupervisor, WayvncError
 
 STATE_STOPPED = "stopped"
@@ -30,7 +31,9 @@ class Service:
                  default_width=config.DEFAULT_WIDTH,
                  default_height=config.DEFAULT_HEIGHT,
                  default_refresh=config.DEFAULT_REFRESH,
-                 vnc_port_preferred=config.DEFAULT_VNC_PORT):
+                 vnc_port_preferred=config.DEFAULT_VNC_PORT,
+                 setup_port_preferred=config.DEFAULT_SETUP_PORT,
+                 setup_page_path=None):
         self.state_dir = state_dir
         self.runtime_dir = runtime_dir
         self._logf = logf or (lambda *a, **k: None)
@@ -38,6 +41,8 @@ class Service:
         self.default_height = default_height
         self.default_refresh = default_refresh
         self.vnc_port_preferred = vnc_port_preferred
+        self.setup_port_preferred = setup_port_preferred
+        self.setup_page_path = setup_page_path or config.setup_page_path()
 
         self._lock = threading.RLock()
         self.state = STATE_STOPPED
@@ -46,9 +51,12 @@ class Service:
         self.width = None
         self.height = None
         self.refresh = None
+        self.scale = None
         self.vnc_port = None
+        self.setup_port = None
         self.last_error = None
         self._wayvnc: WayvncSupervisor | None = None
+        self._setup_server: SetupServer | None = None
         self._on_change = None
 
     def set_notifier(self, on_change) -> None:
@@ -124,9 +132,12 @@ class Service:
             "output_name": self.output_name,
             "bind_ip": self.bind_ip,
             "vnc_port": self.vnc_port,
+            "setup_port": self.setup_port,
+            "setup_url": self._setup_server.url if self._setup_server else None,
             "width": self.width,
             "height": self.height,
             "refresh": self.refresh,
+            "scale": self.scale,
             "client_connected": client_connected,
             "last_error": self.last_error,
         }
@@ -149,9 +160,11 @@ class Service:
 
             output_name = None
             supervisor = None
+            setup_server = None
             try:
                 bind_ip = netinfo.lan_ip()
                 vnc_port = netinfo.free_tcp_port(preferred=self.vnc_port_preferred)
+                setup_port = netinfo.free_tcp_port(preferred=self.setup_port_preferred)
 
                 output_name = hypr.create_headless_output()
                 hypr.set_monitor_mode(output_name, width, height, refresh)
@@ -160,7 +173,16 @@ class Service:
                 supervisor = WayvncSupervisor(output_name, bind_ip, vnc_port, control_socket,
                                                logf=self._logf)
                 supervisor.start(on_death=self._notify)
-            except (hypr.HyprctlError, WayvncError, netinfo.NoLanAddressError) as exc:
+
+                setup_server = SetupServer(bind_ip, setup_port, self.setup_page_path,
+                                            vnc_port=vnc_port,
+                                            on_report=self._handle_client_report,
+                                            logf=self._logf)
+                setup_server.start()
+            except (hypr.HyprctlError, WayvncError, netinfo.NoLanAddressError,
+                    OSError) as exc:
+                if supervisor is not None:
+                    supervisor.stop()
                 if output_name is not None:
                     try:
                         hypr.remove_output(output_name)
@@ -177,18 +199,37 @@ class Service:
             self.output_name = output_name
             self.bind_ip = bind_ip
             self.vnc_port = vnc_port
+            self.setup_port = setup_port
             self.width, self.height, self.refresh = width, height, refresh
+            self.scale = 1.0
             self.last_error = None
             self._wayvnc = supervisor
+            self._setup_server = setup_server
             self._write_session_file()
             self._notify()
             return self._status_locked()
+
+    def _handle_client_report(self, css_width: int, css_height: int, dpr: float) -> None:
+        """Reconfigure the output from the setup page's reported display metrics.
+
+        `css_width`/`css_height` are `screen.width`/`screen.height` as the
+        browser reports them -- CSS pixels, already divided by dpr. The
+        headless output is set to the tablet's *physical* pixel count
+        (css * dpr) with a matching Hyprland scale, so wayvnc captures at
+        native resolution while on-screen UI stays a legible logical size.
+        """
+        physical_width = round(css_width * dpr)
+        physical_height = round(css_height * dpr)
+        self.set_resolution(physical_width, physical_height, scale=dpr)
 
     def stop(self) -> dict:
         with self._lock:
             if self.state == STATE_STOPPED:
                 return self._status_locked()
 
+            if self._setup_server is not None:
+                self._setup_server.stop()
+                self._setup_server = None
             if self._wayvnc is not None:
                 self._wayvnc.stop()
                 self._wayvnc = None
@@ -203,17 +244,19 @@ class Service:
             self.output_name = None
             self.bind_ip = None
             self.vnc_port = None
-            self.width = self.height = self.refresh = None
+            self.setup_port = None
+            self.width = self.height = self.refresh = self.scale = None
             self.last_error = None
             self._notify()
             return self._status_locked()
 
-    def set_resolution(self, width, height, refresh=None) -> dict:
+    def set_resolution(self, width, height, refresh=None, scale=None) -> dict:
         with self._lock:
             if self.state != STATE_RUNNING:
                 raise ServiceError("cannot set resolution while not running")
             refresh = refresh or self.refresh
-            hypr.set_monitor_mode(self.output_name, width, height, refresh)
-            self.width, self.height, self.refresh = width, height, refresh
+            scale = scale if scale is not None else (self.scale or 1.0)
+            hypr.set_monitor_mode(self.output_name, width, height, refresh, scale=scale)
+            self.width, self.height, self.refresh, self.scale = width, height, refresh, scale
             self._notify()
             return self._status_locked()

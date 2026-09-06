@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Fake qrencode for tests: writes a tiny fixed PNG regardless of input,
+just enough to prove the plumbing (args parsed, bytes returned) works."""
+import sys
+
+# A minimal valid 1x1 transparent PNG.
+_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4"
+    "890000000a4944415478da6360000002000155e621060000000049454e44ae42"
+    "6082"
+)
+
+
+def main(argv):
+    if "-o" not in argv:
+        print("fake qrencode: expected -o -", file=sys.stderr)
+        return 1
+    sys.stdout.buffer.write(_PNG)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

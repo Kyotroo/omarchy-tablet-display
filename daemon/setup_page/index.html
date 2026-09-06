@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tablet Display setup</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14161b;
+    --card: #1d2028;
+    --text: #eef0f4;
+    --muted: #9aa1af;
+    --accent: #5b8cff;
+    --accent-text: #0b0e14;
+    --border: #2a2e38;
+    --mono-bg: #0f1116;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 32px 16px 64px;
+  }
+  main { width: 100%; max-width: 420px; }
+  h1 { font-size: 1.3rem; margin: 0 0 4px; }
+  p.lead { color: var(--muted); margin-top: 0; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-top: 18px;
+  }
+  .status-line { font-size: 0.92rem; color: var(--muted); margin: 0 0 14px; }
+  .status-line.ok { color: #7fd88f; }
+  .status-line.fail { color: #e88a8a; }
+  button.primary {
+    width: 100%;
+    padding: 14px 16px;
+    font-size: 1.05rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: var(--accent-text);
+    cursor: pointer;
+  }
+  button.primary:active { opacity: 0.85; }
+  .secondary-link {
+    display: block;
+    text-align: center;
+    margin-top: 14px;
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.92rem;
+  }
+  .manual {
+    margin-top: 22px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+  }
+  .manual h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--muted); margin: 0 0 8px; font-weight: 600; }
+  code.address {
+    display: block;
+    background: var(--mono-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 1rem;
+    word-break: break-all;
+  }
+  .hint { color: var(--muted); font-size: 0.85rem; margin-top: 10px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tablet Display</h1>
+  <p class="lead">Connect this device as a wireless second monitor.</p>
+
+  <div class="card">
+    <p class="status-line" id="reportStatus">Reading your screen&hellip;</p>
+
+    <button class="primary" id="connectButton" hidden>Open in VNC Viewer</button>
+    <a class="secondary-link" id="storeLink" href="#" hidden target="_blank" rel="noopener"></a>
+
+    <div class="manual">
+      <h2>Manual entry</h2>
+      <code class="address" id="manualAddress">detecting&hellip;</code>
+      <p class="hint">Open your VNC app and connect to this address if the button above
+        doesn't work.</p>
+    </div>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var REALVNC_ANDROID = "https://play.google.com/store/apps/details?id=com.realvnc.viewer.android";
+  var REALVNC_IOS = "https://apps.apple.com/app/id352019548";
+  var REALVNC_WINDOWS = "https://www.realvnc.com/en/connect/download/viewer/windows/";
+
+  var statusEl = document.getElementById("reportStatus");
+  var connectButton = document.getElementById("connectButton");
+  var storeLink = document.getElementById("storeLink");
+  var manualAddress = document.getElementById("manualAddress");
+
+  // The server that served this page is the only address a same-origin
+  // fetch can reach -- also the address the VNC session listens on.
+  var host = location.hostname;
+
+  function detectPlatform() {
+    var ua = navigator.userAgent || "";
+    var isIPadOS13Plus = navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+    if (/Android/i.test(ua)) return "android";
+    if (/iPhone|iPad|iPod/i.test(ua) || isIPadOS13Plus) return "ios";
+    if (/Windows/i.test(ua)) return "windows";
+    return "other";
+  }
+
+  function storeInfoFor(platform) {
+    switch (platform) {
+      case "android": return { url: REALVNC_ANDROID, label: "Get RealVNC Viewer on Google Play" };
+      case "ios": return { url: REALVNC_IOS, label: "Get RealVNC Viewer on the App Store" };
+      case "windows": return { url: REALVNC_WINDOWS, label: "Download RealVNC Viewer for Windows" };
+      default: return null;
+    }
+  }
+
+  function reportDisplay() {
+    var payload = {
+      width: window.screen.width,
+      height: window.screen.height,
+      dpr: window.devicePixelRatio || 1
+    };
+    return fetch("/setup/report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(function (res) {
+      if (!res.ok) throw new Error("server rejected the report");
+      return payload;
+    });
+  }
+
+  // The daemon substitutes the real port into this constant when it serves
+  // the page (wayvnc's listening port is only known once the session has
+  // started, and this file has no template engine of its own).
+  var VNC_PORT = "__VNC_PORT__";
+
+  function vncAddress() {
+    return host + ":" + VNC_PORT;
+  }
+
+  function attemptOpenThenFallback(vncUri, fallback) {
+    var fallbackFired = false;
+    var timer = null;
+
+    function cancelFallback() {
+      if (timer !== null) { clearTimeout(timer); timer = null; }
+      document.removeEventListener("visibilitychange", onHide);
+    }
+    function onHide() {
+      if (document.hidden) cancelFallback();
+    }
+
+    document.addEventListener("visibilitychange", onHide);
+    timer = setTimeout(function () {
+      if (!fallbackFired && !document.hidden) {
+        fallbackFired = true;
+        if (fallback) window.location.href = fallback;
+      }
+    }, 1500);
+
+    window.location.href = vncUri;
+  }
+
+  var platform = detectPlatform();
+  var address = vncAddress();
+  manualAddress.textContent = address;
+
+  var store = storeInfoFor(platform);
+  if (store) {
+    storeLink.href = store.url;
+    storeLink.textContent = store.label;
+    storeLink.hidden = false;
+  }
+
+  connectButton.hidden = false;
+  connectButton.addEventListener("click", function () {
+    attemptOpenThenFallback("vnc://" + address, store ? store.url : null);
+  });
+
+  reportDisplay().then(function (payload) {
+    statusEl.textContent = "Screen detected: " + payload.width + "×" + payload.height +
+      " @" + payload.dpr + "x — the display is being resized now.";
+    statusEl.className = "status-line ok";
+  }).catch(function () {
+    statusEl.textContent = "Could not report your screen size automatically. " +
+      "The display will stay at its default resolution; connect manually below.";
+    statusEl.className = "status-line fail";
+  });
+})();
+</script>
+</body>
+</html>

@@ -37,7 +37,7 @@ class ServiceTestCase(unittest.TestCase):
             "next_headless": 1,
         }))
         os.environ["FAKE_HYPR_STATE"] = str(self.hypr_state_path)
-        os.environ["FAKE_LAN_IP"] = "192.168.1.50"
+        os.environ["FAKE_LAN_IP"] = "127.0.0.1"
         os.environ.pop("FAKE_HYPR_FAIL", None)
         os.environ.pop("FAKE_WAYVNC_CRASH_AFTER", None)
         os.environ.pop("FAKE_WAYVNC_CRASH_MARKER", None)
@@ -88,7 +88,7 @@ class ServiceTestCase(unittest.TestCase):
         self.assertEqual(status["output_name"], "HEADLESS-1")
         self.assertEqual(status["width"], service.config.DEFAULT_WIDTH)
         self.assertEqual(status["height"], service.config.DEFAULT_HEIGHT)
-        self.assertEqual(status["bind_ip"], "192.168.1.50")
+        self.assertEqual(status["bind_ip"], "127.0.0.1")
 
         names = {m["name"] for m in self.hypr_state()["monitors"]}
         self.assertIn("HEADLESS-1", names)

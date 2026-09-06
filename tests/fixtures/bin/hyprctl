@@ -77,12 +77,14 @@ def main(argv):
             return 1
         name = json.loads(match.group(1))
         mode = json.loads(match.group(2))
+        scale_match = re.search(r"scale=([0-9.]+)", argv[1])
+        scale = float(scale_match.group(1)) if scale_match else 1.0
         dims = mode.split("@")[0]
         width, height = (int(x) for x in dims.split("x"))
         refresh = float(mode.split("@")[1]) if "@" in mode else 60.0
         for m in state["monitors"]:
             if m["name"] == name:
-                m["width"], m["height"], m["refreshRate"] = width, height, refresh
+                m["width"], m["height"], m["refreshRate"], m["scale"] = width, height, refresh, scale
         save(state)
         print("ok")
         return 0

@@ -156,6 +156,7 @@ class IPCServer:
                     width=params["width"],
                     height=params["height"],
                     refresh=params.get("refresh"),
+                    scale=params.get("scale"),
                 )
             else:
                 return protocol.error_response(

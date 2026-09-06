@@ -17,6 +17,7 @@ DEFAULT_WIDTH = 1920
 DEFAULT_HEIGHT = 1080
 DEFAULT_REFRESH = 60.0
 DEFAULT_VNC_PORT = 5900
+DEFAULT_SETUP_PORT = 5810
 
 
 def runtime_dir() -> Path:
@@ -42,3 +43,9 @@ def wayvnc_control_socket_path() -> Path:
 
 def session_file_path() -> Path:
     return state_dir() / "session.json"
+
+
+def setup_page_path() -> Path:
+    """Path to the bundled static setup page, relative to this checkout --
+    never installed elsewhere, so plugin files stay self-contained."""
+    return Path(__file__).resolve().parent.parent / "setup_page" / "index.html"
