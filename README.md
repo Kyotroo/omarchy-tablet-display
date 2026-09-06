@@ -38,7 +38,7 @@ below.
 
 ## Quick start
 
-![Enabling the plugin, then the one-time background service setup](docs/install-clip.gif)
+![Enabling the plugin, then the one-time setup and its password prompt](docs/install-clip.gif)
 
 1. Click the bar icon. The panel opens.
 2. **First time only**: the panel shows a "Set up now" button instead of
