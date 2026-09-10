@@ -72,13 +72,15 @@ class Service:
         settings = self._load_settings()
         self.position = settings.get("position", config.DEFAULT_POSITION)
         self.display_mode = settings.get("display_mode", config.DEFAULT_DISPLAY_MODE)
-        self.encryption_enabled = settings.get("encryption_enabled", config.DEFAULT_ENCRYPTION_ENABLED)
         self.vnc_username = settings.get("vnc_username", config.DEFAULT_VNC_USERNAME)
-        # Generated lazily on first enable (see set_encryption), not here:
-        # a fresh password every time nothing has ever asked for one would
+        # Generated on first use in _prepare_wayvnc_config, not here: a
+        # fresh password before anything has ever started a session would
         # mean generating one on every single daemon start for no reason.
         self.vnc_password = settings.get("vnc_password")
         self.mirror_source = None
+        # Per-session, regenerated on every start(), never persisted -- see
+        # security.generate_setup_token.
+        self._setup_token = None
 
     def set_notifier(self, on_change) -> None:
         self._on_change = on_change
@@ -98,11 +100,10 @@ class Service:
         path.write_text(json.dumps({
             "position": self.position,
             "display_mode": self.display_mode,
-            "encryption_enabled": self.encryption_enabled,
             "vnc_username": self.vnc_username,
             "vnc_password": self.vnc_password,
         }))
-        path.chmod(0o600)  # holds vnc_password once encryption has ever been enabled
+        path.chmod(0o600)  # holds vnc_password
 
     def _session_file(self):
         return self.state_dir / "session.json"
@@ -195,9 +196,13 @@ class Service:
             "position": self.position,
             "display_mode": self.display_mode,
             "mirror_source": self.mirror_source,
-            "encryption_enabled": self.encryption_enabled,
-            "vnc_username": self.vnc_username if self.encryption_enabled else None,
-            "vnc_password": self.vnc_password if self.encryption_enabled else None,
+            # Always True -- there is no setting to turn this off (see
+            # config.py). Kept as a status field, not just dropped, so the
+            # panel can show a fixed "always encrypted" indicator instead of
+            # silently having nothing to say about it.
+            "encryption_enabled": True,
+            "vnc_username": self.vnc_username,
+            "vnc_password": self.vnc_password,
             "client_connected": client_connected,
             "last_error": self.last_error,
         }
@@ -258,18 +263,20 @@ class Service:
                     scale_applied = 1.0
                     mirror_source = None
 
-                wayvnc_config_path = self._prepare_wayvnc_config() if self.encryption_enabled else None
+                wayvnc_config_path = self._prepare_wayvnc_config()
 
                 control_socket = str(self.runtime_dir / f"{config.SERVICE_NAME}-wayvnc.sock")
                 supervisor = WayvncSupervisor(output_name, bind_ip, vnc_port, control_socket,
                                                logf=self._logf, config_path=wayvnc_config_path)
                 supervisor.start(on_death=self._notify)
 
+                setup_token = security.generate_setup_token()
                 setup_server = SetupServer(bind_ip, setup_port, self.setup_page_path,
                                             vnc_port=vnc_port,
                                             on_report=self._handle_client_report,
-                                            vnc_username=self.vnc_username if self.encryption_enabled else None,
-                                            vnc_password=self.vnc_password if self.encryption_enabled else None,
+                                            vnc_username=self.vnc_username,
+                                            vnc_password=self.vnc_password,
+                                            setup_token=setup_token,
                                             logf=self._logf)
                 setup_server.start()
             except (hypr.HyprctlError, WayvncError, netinfo.NoLanAddressError,
@@ -298,6 +305,7 @@ class Service:
             self.width, self.height, self.refresh = width, height, refresh
             self.scale = scale_applied
             self.mirror_source = mirror_source
+            self._setup_token = setup_token
             self.last_error = None
             self._wayvnc = supervisor
             self._setup_server = setup_server
@@ -347,6 +355,18 @@ class Service:
             return
         physical_width = round(css_width * dpr)
         physical_height = round(css_height * dpr)
+        # setup_server.py already bounds css_width/css_height/dpr
+        # individually, but their product is what actually reaches hyprctl
+        # -- a security review found the old per-field bounds alone still
+        # allowed a 128000x128000 request. This is the final word on it,
+        # independent of whatever combination produced these numbers.
+        if not (1 <= physical_width <= config.MAX_PHYSICAL_DIMENSION
+                and 1 <= physical_height <= config.MAX_PHYSICAL_DIMENSION):
+            self._logf(
+                "ignored out-of-range reported resolution: %sx%s @%sx dpr -> physical %sx%s",
+                css_width, css_height, dpr, physical_width, physical_height,
+            )
+            return
         self.set_resolution(physical_width, physical_height, scale=dpr)
 
     def stop(self) -> dict:
@@ -375,6 +395,7 @@ class Service:
             self.setup_port = None
             self.width = self.height = self.refresh = self.scale = None
             self.mirror_source = None
+            self._setup_token = None
             self.last_error = None
             self._notify()
             return self._status_locked()
@@ -456,34 +477,6 @@ class Service:
             self._notify()
             return self._status_locked()
 
-    def set_encryption(self, enabled: bool) -> dict:
-        with self._lock:
-            was_running = self.state == STATE_RUNNING
-            # wayvnc has no runtime toggle for this -- it is set only via
-            # the config file passed at launch -- so turning it on/off while
-            # a session is live means restarting wayvnc, same as switching
-            # display mode. The VNC client sees a brief disconnect/reconnect.
-            prior_width, prior_height, prior_refresh = self.width, self.height, self.refresh
-
-            self.encryption_enabled = bool(enabled)
-            if self.encryption_enabled and not self.vnc_password:
-                # Generated as soon as the toggle is switched on, not lazily
-                # at the next start: the panel shows this password right
-                # away, and making someone click Start first just to learn
-                # what it is would be a needless extra step.
-                self.vnc_password = security.generate_password()
-            self._save_settings()
-
-            if was_running:
-                self.stop()
-                status = self.start(width=prior_width, height=prior_height, refresh=prior_refresh)
-                if status["state"] == STATE_ERROR:
-                    raise ServiceError(status["last_error"] or "failed to switch encryption")
-                return status
-
-            self._notify()
-            return self._status_locked()
-
     def regenerate_password(self) -> dict:
         """Issues a fresh random password, invalidating the old one immediately."""
         with self._lock:
@@ -510,7 +503,7 @@ class Service:
             self.vnc_username = username
             self._save_settings()
 
-            if self.state == STATE_RUNNING and self.encryption_enabled:
+            if self.state == STATE_RUNNING:
                 prior_width, prior_height, prior_refresh = self.width, self.height, self.refresh
                 self.stop()
                 status = self.start(width=prior_width, height=prior_height, refresh=prior_refresh)
@@ -523,14 +516,14 @@ class Service:
 
     def _apply_new_password(self, password: str) -> dict:
         """Common tail for regenerate_password/set_password: persist, and
-        apply live (restarts wayvnc with the new config, same as
-        set_encryption) so a leaked/shared-too-widely password can
-        actually be revoked, not just changed for next time.
+        apply live (restarts wayvnc with the new config) so a
+        leaked/shared-too-widely password can actually be revoked, not just
+        changed for next time.
         """
         self.vnc_password = password
         self._save_settings()
 
-        if self.state == STATE_RUNNING and self.encryption_enabled:
+        if self.state == STATE_RUNNING:
             prior_width, prior_height, prior_refresh = self.width, self.height, self.refresh
             self.stop()
             status = self.start(width=prior_width, height=prior_height, refresh=prior_refresh)

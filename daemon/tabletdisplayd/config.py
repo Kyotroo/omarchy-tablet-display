@@ -20,7 +20,11 @@ DEFAULT_VNC_PORT = 5900
 DEFAULT_SETUP_PORT = 5810
 DEFAULT_POSITION = "auto-right"
 DEFAULT_DISPLAY_MODE = "extend"
-DEFAULT_ENCRYPTION_ENABLED = False
+# A marketplace security review correctly flagged an earlier opt-in design
+# (encryption off by default) as exposing an unauthenticated remote desktop
+# to the whole LAN subnet the moment a session starts, not just the
+# intended tablet. TLS + a password is now unconditional -- there is no
+# setting to turn it back off.
 # Not a secret -- the password is what protects the connection -- but some
 # VNC clients (confirmed with RealVNC Viewer) prompt for a username even
 # though wayvnc defaults to an empty one, and leaving that blank is not
@@ -32,6 +36,17 @@ MIN_PASSWORD_LENGTH = 4
 MAX_PASSWORD_LENGTH = 64
 MIN_USERNAME_LENGTH = 1
 MAX_USERNAME_LENGTH = 64
+
+# Bounds for the tablet's self-reported screen size (setup_server.py) and
+# the physical pixel count it produces once multiplied by devicePixelRatio
+# (service.py's _handle_client_report). A marketplace security review found
+# the old bounds (16000 per axis, DPR up to 8) let an unauthenticated LAN
+# peer force repeated 128000x128000 monitor-mode requests. These are still
+# generous for any real device -- the point is a firm ceiling, not
+# accommodating a hypothetical display no tablet actually has.
+MAX_REPORT_CSS_DIMENSION = 8000
+MAX_REPORT_DPR = 4.0
+MAX_PHYSICAL_DIMENSION = 7680
 
 # Hyprland's own vocabulary for hl.monitor()'s `position`, confirmed live
 # (each places the new output relative to whatever else is already placed).

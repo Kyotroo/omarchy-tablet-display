@@ -1,7 +1,6 @@
 """Tests for the embedded setup-page HTTP server: page serving, QR endpoint,
 and the report POST that feeds back into resolution reconfiguration."""
 import json
-import os
 import socket
 import struct
 import sys
@@ -17,6 +16,7 @@ sys.path.insert(0, str(REPO_ROOT / "daemon"))
 from tabletdisplayd.setup_server import SetupServer  # noqa: E402
 
 PAGE_PATH = REPO_ROOT / "daemon" / "setup_page" / "index.html"
+TOKEN = "test-token-Ab12"
 
 
 class SetupServerTestCase(unittest.TestCase):
@@ -25,6 +25,8 @@ class SetupServerTestCase(unittest.TestCase):
         self.server = SetupServer(
             "127.0.0.1", 0, PAGE_PATH, vnc_port=5900,
             on_report=lambda w, h, d: self.reports.append((w, h, d)),
+            vnc_username="someone", vnc_password="Ab3dEfGh9k",
+            setup_token=TOKEN,
         )
         # Port 0 means "any free port" for a raw socket, but ThreadingHTTPServer
         # needs a concrete one up front -- resolve one the same way the daemon
@@ -47,6 +49,12 @@ class SetupServerTestCase(unittest.TestCase):
                                       headers={"Content-Type": "application/json"})
         return urllib.request.urlopen(req, timeout=3)
 
+    def post_report(self, width, height, dpr=None, token=TOKEN):
+        payload = {"token": token, "width": width, "height": height}
+        if dpr is not None:
+            payload["dpr"] = dpr
+        return self.post("/setup/report", payload)
+
     def test_setup_page_served_with_port_substituted(self):
         with self.get("/setup") as res:
             body = res.read().decode()
@@ -54,25 +62,32 @@ class SetupServerTestCase(unittest.TestCase):
         self.assertIn("5900", body)
         self.assertNotIn("__VNC_PORT__", body)
 
-    def test_setup_page_shows_username_and_password_when_encrypted(self):
-        from tabletdisplayd import netinfo
-
-        secure = SetupServer(
-            "127.0.0.1", netinfo.free_tcp_port(), PAGE_PATH, vnc_port=5900,
-            on_report=lambda w, h, d: None,
-            vnc_username="someone", vnc_password="Ab3dEfGh9k",
-        )
-        secure.start()
-        try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{secure.port}/setup", timeout=3) as res:
-                body = res.read().decode()
-        finally:
-            secure.stop()
-
+    def test_setup_page_shows_username_and_password(self):
+        with self.get("/setup") as res:
+            body = res.read().decode()
         self.assertIn("Ab3dEfGh9k", body)
         self.assertIn("someone", body)
         self.assertNotIn("__VNC_PASSWORD__", body)
         self.assertNotIn("__VNC_USERNAME__", body)
+
+    def test_setup_page_embeds_the_setup_token(self):
+        with self.get("/setup") as res:
+            body = res.read().decode()
+        self.assertIn(TOKEN, body)
+        self.assertNotIn("__SETUP_TOKEN__", body)
+
+    def test_setup_url_includes_the_token(self):
+        self.assertIn(f"t={TOKEN}", self.server.url)
+
+    def test_the_actual_setup_url_this_server_hands_out_is_fetchable(self):
+        # server.url includes the query string (?t=...); GET must route on
+        # the path alone or the exact link this daemon puts in the QR code
+        # would 404. Caught live: an earlier version of do_GET compared
+        # self.path to "/setup" exactly, before the token was added to the
+        # URL at all.
+        path_and_query = self.server.url.split("/setup", 1)[1]
+        with self.get("/setup" + path_and_query) as res:
+            self.assertEqual(res.status, 200)
 
     def test_qr_png_served(self):
         with self.get("/qr.png") as res:
@@ -103,18 +118,43 @@ class SetupServerTestCase(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 404)
 
     def test_valid_report_invokes_callback(self):
-        with self.post("/setup/report", {"width": 1600, "height": 900, "dpr": 2.0}) as res:
+        with self.post_report(1600, 900, 2.0) as res:
             self.assertEqual(res.status, 204)
         self.assertEqual(self.reports, [(1600, 900, 2.0)])
 
     def test_report_defaults_dpr_to_one(self):
-        with self.post("/setup/report", {"width": 1280, "height": 800}) as res:
+        with self.post_report(1280, 800) as res:
             self.assertEqual(res.status, 204)
         self.assertEqual(self.reports, [(1280, 800, 1.0)])
 
+    def test_report_missing_token_is_rejected(self):
+        # A security review found this endpoint accepted a POST from any
+        # LAN peer, not just whoever loaded this session's own setup page.
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self.post("/setup/report", {"width": 1280, "height": 800})
+        self.assertEqual(ctx.exception.code, 400)  # missing key -> malformed request
+        self.assertEqual(self.reports, [])
+
+    def test_report_wrong_token_is_rejected(self):
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self.post_report(1280, 800, token="not-the-right-token")
+        self.assertEqual(ctx.exception.code, 403)
+        self.assertEqual(self.reports, [])
+
     def test_report_rejects_out_of_range_dimensions(self):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
-            self.post("/setup/report", {"width": 0, "height": 900, "dpr": 1})
+            self.post_report(0, 900, 1)
+        self.assertEqual(ctx.exception.code, 400)
+        self.assertEqual(self.reports, [])
+
+    def test_report_rejects_dimensions_above_the_configured_ceiling(self):
+        # The old ceiling (16000 per axis, DPR up to 8) let an
+        # unauthenticated peer force a 128000x128000 request -- this is the
+        # HTTP-layer half of that fix; the physical (post-DPR) product is
+        # bounded again in service.py regardless of what combination of
+        # values produced it.
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            self.post_report(16000, 900, 8)
         self.assertEqual(ctx.exception.code, 400)
         self.assertEqual(self.reports, [])
 
@@ -134,11 +174,13 @@ class SetupServerTestCase(unittest.TestCase):
             raise RuntimeError("simulated failure applying resolution")
 
         flaky = SetupServer("127.0.0.1", netinfo.free_tcp_port(), PAGE_PATH,
-                             vnc_port=5900, on_report=blow_up)
+                             vnc_port=5900, on_report=blow_up,
+                             vnc_username="someone", vnc_password="Ab3dEfGh9k",
+                             setup_token=TOKEN)
         flaky.start()
         try:
             base = f"http://127.0.0.1:{flaky.port}"
-            data = json.dumps({"width": 1024, "height": 768, "dpr": 1}).encode()
+            data = json.dumps({"token": TOKEN, "width": 1024, "height": 768, "dpr": 1}).encode()
             req = urllib.request.Request(base + "/setup/report", data=data, method="POST",
                                           headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=3) as res:

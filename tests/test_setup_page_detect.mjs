@@ -75,7 +75,8 @@ function runPage({ userAgent, userAgentData, platform, maxTouchPoints, vncPort, 
   const patched = scriptBody
     .replace(/__VNC_PORT__/, String(vncPort ?? 5900))
     .replace(/__VNC_USERNAME__/, vncUsername ?? "remote")
-    .replace(/__VNC_PASSWORD__/, vncPassword ?? "");
+    .replace(/__VNC_PASSWORD__/, vncPassword ?? "")
+    .replace(/__SETUP_TOKEN__/, "test-token");
   vm.createContext(sandbox);
   vm.runInContext(patched, sandbox);
   return elements;

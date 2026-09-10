@@ -34,6 +34,18 @@ def generate_password() -> str:
     return "".join(secrets.choice(_PASSWORD_ALPHABET) for _ in range(_PASSWORD_LENGTH))
 
 
+def generate_setup_token() -> str:
+    """Short-lived token binding a setup-page report to whoever loaded this
+    session's own setup URL/QR code. Without it, `/setup/report` would
+    accept a POST from any LAN peer, not just the tablet -- confirmed as a
+    real marketplace review finding: an unauthenticated peer could force
+    repeated display reconfiguration. Regenerated on every `start()`, never
+    persisted, and embedded directly in the setup URL and page (see
+    setup_server.py), so only someone with the *current* session's link can
+    produce a request the server accepts."""
+    return secrets.token_urlsafe(24)
+
+
 def _reject_control_characters(value: str, field: str) -> None:
     """A newline in a value written verbatim into a `key=value` wayvnc
     config line would inject an extra config line -- e.g. a password of

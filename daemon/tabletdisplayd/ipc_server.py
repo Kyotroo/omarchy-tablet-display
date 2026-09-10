@@ -164,8 +164,6 @@ class IPCServer:
                 result = self.service.set_position(params["position"])
             elif method == protocol.METHOD_SET_DISPLAY_MODE:
                 result = self.service.set_display_mode(params["mode"])
-            elif method == protocol.METHOD_SET_ENCRYPTION:
-                result = self.service.set_encryption(params["enabled"])
             elif method == protocol.METHOD_REGENERATE_PASSWORD:
                 result = self.service.regenerate_password()
             elif method == protocol.METHOD_SET_PASSWORD:

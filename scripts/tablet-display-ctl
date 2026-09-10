@@ -7,7 +7,6 @@
     tablet-display-ctl set-resolution width height [refresh]
     tablet-display-ctl set-position auto-left|auto-right|auto-up|auto-down
     tablet-display-ctl set-display-mode extend|mirror
-    tablet-display-ctl set-encryption on|off
     tablet-display-ctl regenerate-password
     tablet-display-ctl set-password <password>
     tablet-display-ctl set-username <username>
@@ -30,7 +29,6 @@ METHOD_ALIASES = {
     "set-resolution": "set_resolution",
     "set-position": "set_position",
     "set-display-mode": "set_display_mode",
-    "set-encryption": "set_encryption",
     "regenerate-password": "regenerate_password",
     "set-password": "set_password",
     "set-username": "set_username",
@@ -73,10 +71,6 @@ def main(argv):
         if len(argv) < 2:
             sys.exit("set-display-mode needs a mode (extend|mirror)")
         params["mode"] = argv[1]
-    elif method == "set_encryption":
-        if len(argv) < 2 or argv[1] not in ("on", "off"):
-            sys.exit("set-encryption needs on|off")
-        params["enabled"] = argv[1] == "on"
     elif method == "set_password":
         if len(argv) < 2:
             sys.exit("set-password needs a password")

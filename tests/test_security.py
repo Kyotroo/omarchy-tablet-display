@@ -1,7 +1,7 @@
-"""Tests for security.py: password generation and the self-signed cert /
-wayvnc config plumbing behind the encryption toggle. Uses the fake openssl
-fixture (tests/fixtures/bin/openssl) so these stay fast and don't need a
-real keypair generated on every run.
+"""Tests for security.py: password/setup-token generation and the
+self-signed cert / wayvnc config plumbing behind every session's mandatory
+encryption. Uses the fake openssl fixture (tests/fixtures/bin/openssl) so
+these stay fast and don't need a real keypair generated on every run.
 """
 import os
 import stat
@@ -28,6 +28,18 @@ class PasswordTestCase(unittest.TestCase):
         password = security.generate_password() * 50  # enough samples
         for char in "0O1lI":
             self.assertNotIn(char, password)
+
+
+class SetupTokenTestCase(unittest.TestCase):
+    def test_tokens_are_not_all_identical(self):
+        tokens = {security.generate_setup_token() for _ in range(20)}
+        self.assertEqual(len(tokens), 20)
+
+    def test_token_is_reasonably_long_and_url_safe(self):
+        token = security.generate_setup_token()
+        self.assertGreaterEqual(len(token), 24)
+        allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+        self.assertTrue(set(token) <= allowed)
 
 
 class ValidatePasswordTestCase(unittest.TestCase):

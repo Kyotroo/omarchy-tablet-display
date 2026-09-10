@@ -18,9 +18,9 @@ toggle, scan a QR code, connect. No manual Hyprland config, no running
 - **Position**: tell Hyprland which side of your main screen the new
   display sits on (left/right/above/below), so window/workspace movement
   between screens goes the direction you'd expect.
-- **Optional encryption**: a toggle turns on TLS + a username/password for
-  the VNC session (self-signed certificate, generated once). Off by
-  default, matching a plain LAN-only setup.
+- **Always encrypted**: every session is TLS + username/password
+  protected (self-signed certificate, generated once) — there's no setting
+  to turn it off, so there's no accidentally-unauthenticated LAN exposure.
 - **Resolution presets**: a small bundled list of tablets to pick from
   instead of relying on auto-detection, for cases like split-screen mode or
   a forced OS zoom level throwing the auto-detected size off.
@@ -65,7 +65,11 @@ below.
    button to open the address directly in a VNC app — installing one first
    if needed (defaults to [RealVNC
    Viewer](https://www.realvnc.com/en/connect/download/viewer/), available
-   free on Android, iOS, Windows, macOS, and Linux).
+   free on Android, iOS, Windows, macOS, and Linux). The VNC app asks for
+   the username/password shown on the same page, and shows a one-time
+   "untrusted certificate" prompt the first time — expected for a
+   self-signed certificate, the same as any other self-managed device on
+   your network; accept it.
 6. Click the bar icon again (or the Stop button in the panel) to tear
    everything down cleanly.
 
@@ -108,17 +112,19 @@ applies, since wayvnc has no way to change these without restarting):
 | Resolution preset | Overrides auto-detection; pick "Auto-detected" to go back to reading the tablet's own reported size. |
 | Display mode | **Extend** (default): a real second monitor with its own workspace. **Duplicate**: mirrors whichever screen is currently focused — no separate workspace, since it isn't a separate display. |
 | Position | Where the new display sits relative to your main screen. Only meaningful in Extend mode. |
-| Secure connection | Off by default (plain, unauthenticated — fine for a trusted home LAN). On: TLS + username/password, self-signed certificate generated once and reused. |
-| Username / Password | Editable once encryption is on. A random password is generated the first time you enable encryption; use Regenerate for a new random one, or type your own. |
+| Username / Password | Always shown once a session has started. A random password is generated the first time, self-signed certificate generated once and reused; use Regenerate for a new random one, or type your own. |
 
 ## Firewall
 
-wayvnc and the setup page are intentionally unauthenticated unless you turn
-on the Secure connection setting, so they're scoped to your LAN by the
-firewall rule the installer adds (`ufw`, if present) rather than by the
-plugin itself. If you use a different firewall, or `ufw` wasn't active at
-install time, allow inbound TCP on the setup port (5810 by default) and the
-VNC port (5900 by default) from your LAN subnet.
+The VNC session itself is always TLS + password protected, but the setup
+page (the one the QR code opens) still only needs to be reachable, not
+public — so it's scoped to your LAN by the firewall rule the installer adds
+(`ufw`, if present) rather than by the plugin itself. The setup page's one
+POST endpoint (which reports the tablet's screen size back) is further
+bound to a per-session token embedded in that same QR/link, so a device
+that never loaded it can't call it. If you use a different firewall, or
+`ufw` wasn't active at install time, allow inbound TCP on the setup port
+(5810 by default) and the VNC port (5900 by default) from your LAN subnet.
 
 ## Known limitations
 

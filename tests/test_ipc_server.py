@@ -35,11 +35,9 @@ def request(method, params=None):
 class DispatchTestCase(unittest.TestCase):
     def setUp(self):
         # A fresh subdir per test: settings.json (position/display_mode/
-        # encryption/username/password) persists across Service instances
-        # by design, so tests sharing one directory would leak state
-        # between each other -- confirmed live, a set_encryption test
-        # running first made a later, unrelated test see encryption already
-        # on. Same fix ServiceTestCase already uses.
+        # username/password) persists across Service instances by design,
+        # so tests sharing one directory would leak state between each
+        # other -- confirmed live. Same fix ServiceTestCase already uses.
         tmp = Path(tempfile.mkdtemp(dir=os.environ["TEST_TMP_DIR"]))
         self.svc = Service(state_dir=tmp / "state2", runtime_dir=tmp / "runtime2")
         self.server = IPCServer(tmp / "unused.sock", self.svc)
@@ -84,15 +82,6 @@ class DispatchTestCase(unittest.TestCase):
         self.assertNotIn("error", response)
         self.assertEqual(response["result"]["position"], "auto-up")
 
-    def test_set_encryption_missing_params_is_invalid_params_error(self):
-        response, _ = self.server.dispatch(request(protocol.METHOD_SET_ENCRYPTION, {}))
-        self.assertEqual(response["error"]["code"], "invalid_params")
-
-    def test_set_encryption_while_stopped_succeeds(self):
-        response, _ = self.server.dispatch(request(protocol.METHOD_SET_ENCRYPTION, {"enabled": True}))
-        self.assertNotIn("error", response)
-        self.assertTrue(response["result"]["encryption_enabled"])
-
     def test_regenerate_password_while_stopped_succeeds(self):
         response, _ = self.server.dispatch(request(protocol.METHOD_REGENERATE_PASSWORD))
         self.assertNotIn("error", response)
@@ -104,7 +93,7 @@ class DispatchTestCase(unittest.TestCase):
     def test_set_username_valid_value_succeeds(self):
         response, _ = self.server.dispatch(request(protocol.METHOD_SET_USERNAME, {"username": "kdm"}))
         self.assertNotIn("error", response)
-        self.assertEqual(response["result"]["vnc_username"], None)  # hidden while encryption is off
+        self.assertEqual(response["result"]["vnc_username"], "kdm")
 
     def test_set_resolution_missing_params_is_invalid_params_error(self):
         response, _ = self.server.dispatch(request(protocol.METHOD_SET_RESOLUTION, {}))

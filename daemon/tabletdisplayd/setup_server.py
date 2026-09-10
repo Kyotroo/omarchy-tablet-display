@@ -10,12 +10,14 @@ metrics.
 
 from __future__ import annotations
 
+import hmac
 import http.server
 import json
 import sys
 import threading
+import urllib.parse
 
-from . import qrcode_gen
+from . import config, qrcode_gen
 
 MAX_REPORT_BODY = 8192
 
@@ -27,13 +29,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.server.tabletdisplay_logf("setup-http: " + fmt, *args)
 
     def do_GET(self):
-        if self.path in ("/setup", "/setup/"):
+        # The setup URL/QR code carries the setup token as a query string
+        # (`?t=...`) so the served page can echo it back on its report POST
+        # -- route on the path alone, or the exact link this daemon itself
+        # hands out would 404. The token isn't checked here: GET has no
+        # side effect, only the POST it leads to does.
+        path = urllib.parse.urlsplit(self.path).path
+        if path in ("/setup", "/setup/"):
             self.server.tabletdisplay_logf(
                 "setup-http: GET /setup from %s, User-Agent: %s",
                 self.client_address[0], self.headers.get("User-Agent", "(none)"),
             )
             self._send(200, "text/html; charset=utf-8", self.server.tabletdisplay_page)
-        elif self.path == "/qr.png":
+        elif path == "/qr.png":
             self._send(200, "image/png", self.server.tabletdisplay_qr_png)
         else:
             self._send(404, "text/plain; charset=utf-8", b"not found")
@@ -54,6 +62,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         raw = self.rfile.read(length)
         try:
             payload = json.loads(raw)
+            token = payload["token"]
             width = int(payload["width"])
             height = int(payload["height"])
             dpr = float(payload.get("dpr", 1))
@@ -61,11 +70,28 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._send(400, "text/plain; charset=utf-8", b"bad request")
             return
 
-        # The reported dimensions are the only thing this daemon trusts from
-        # the client; a user agent string is display-only on the page and
-        # never reaches here. Bounds are generous but reject garbage/hostile
-        # values (e.g. a 0 or a many-million-pixel claim).
-        if not (1 <= width <= 16000 and 1 <= height <= 16000 and 0.25 <= dpr <= 8):
+        # Constant-time: this is the one thing standing between "only the
+        # device that loaded this session's own setup page" and "any LAN
+        # peer that guesses the port" -- a security review correctly flagged
+        # the earlier version, which had no check here at all.
+        if not isinstance(token, str) or not hmac.compare_digest(
+            token, self.server.tabletdisplay_setup_token
+        ):
+            self._send(403, "text/plain; charset=utf-8", b"forbidden")
+            return
+
+        # The reported dimensions are the only other thing this daemon
+        # trusts from the client; a user agent string is display-only on
+        # the page and never reaches here. Bounds are generous but reject
+        # garbage/hostile values (e.g. a 0 or a many-million-pixel claim) --
+        # the *physical* (post-DPR) ceiling is enforced again in
+        # service.py's _handle_client_report, since that is the number that
+        # actually reaches hyprctl.
+        if not (
+            1 <= width <= config.MAX_REPORT_CSS_DIMENSION
+            and 1 <= height <= config.MAX_REPORT_CSS_DIMENSION
+            and 0.25 <= dpr <= config.MAX_REPORT_DPR
+        ):
             self._send(400, "text/plain; charset=utf-8", b"value out of range")
             return
 
@@ -103,13 +129,14 @@ class _ThreadingHTTPServer(http.server.ThreadingHTTPServer):
 
 class SetupServer:
     def __init__(self, bind_ip: str, port: int, page_path, vnc_port: int, on_report,
-                 vnc_username: str | None = None, vnc_password: str | None = None, logf=None):
+                 vnc_username: str, vnc_password: str, setup_token: str, logf=None):
         self.bind_ip = bind_ip
         self.port = port
         self.page_path = page_path
         self.vnc_port = vnc_port
         self.vnc_username = vnc_username
         self.vnc_password = vnc_password
+        self.setup_token = setup_token
         self._on_report = on_report
         self._logf = logf or (lambda *a, **k: None)
         self._server: _ThreadingHTTPServer | None = None
@@ -118,7 +145,11 @@ class SetupServer:
 
     @property
     def url(self) -> str:
-        return f"http://{self.bind_ip}:{self.port}/setup"
+        # The token rides in the query string rather than only being read
+        # from the served page's own JS: this same URL is also what the
+        # panel shows for manual entry, and both paths need to land on a
+        # page whose report requests the server will actually accept.
+        return f"http://{self.bind_ip}:{self.port}/setup?t={self.setup_token}"
 
     @property
     def qr_url(self) -> str:
@@ -130,8 +161,9 @@ class SetupServer:
         # at serve time rather than templated ahead of time.
         page_text = self.page_path.read_text(encoding="utf-8")
         page_text = page_text.replace("__VNC_PORT__", str(self.vnc_port))
-        page_text = page_text.replace("__VNC_PASSWORD__", self.vnc_password or "")
-        page_text = page_text.replace("__VNC_USERNAME__", self.vnc_username or "")
+        page_text = page_text.replace("__VNC_PASSWORD__", self.vnc_password)
+        page_text = page_text.replace("__VNC_USERNAME__", self.vnc_username)
+        page_text = page_text.replace("__SETUP_TOKEN__", self.setup_token)
         page_bytes = page_text.encode("utf-8")
         qr_png = qrcode_gen.generate_png(self.url)
         self.qr_png_bytes = qr_png
@@ -140,6 +172,7 @@ class SetupServer:
         self._server.tabletdisplay_page = page_bytes
         self._server.tabletdisplay_qr_png = qr_png
         self._server.tabletdisplay_on_report = self._on_report
+        self._server.tabletdisplay_setup_token = self.setup_token
         self._server.tabletdisplay_logf = self._logf
 
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
