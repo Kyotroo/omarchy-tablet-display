@@ -55,7 +55,10 @@ below.
    needing a terminal. If that agent isn't available for some reason, it
    falls back to printing the exact command to run yourself instead of
    failing silently.
-3. Click **Start**.
+   The panel has two tabs, **Connect** and **Settings** — it opens on
+   Settings first (Connect has nothing to show yet), and switches to
+   Connect automatically once you start a session.
+3. Click **Start** (on the Settings tab).
 
 ![Scanning the QR code to connect](docs/quick-start.gif)
 
@@ -101,11 +104,12 @@ their own settings; most desktop clients don't.
 
 ## Settings
 
-![Changing position and turning on Secure connection](docs/settings.gif)
+![Changing position and display mode on the Settings tab](docs/settings.gif)
 
-All of these live in the panel and take effect immediately if a session is
-already running (a brief VNC disconnect/reconnect while the change
-applies, since wayvnc has no way to change these without restarting):
+All of these live on the panel's **Settings** tab and take effect
+immediately if a session is already running (a brief VNC
+disconnect/reconnect while the change applies, since wayvnc has no way to
+change these without restarting):
 
 | Setting | Notes |
 | --- | --- |
