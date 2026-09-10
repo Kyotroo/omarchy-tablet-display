@@ -40,7 +40,10 @@ below.
 
 ![Enabling the plugin, then the one-time setup and its password prompt](docs/install-clip.gif)
 
-1. Click the bar icon. The panel opens.
+1. Click the bar icon. The panel opens, with two tabs — **Connect** and
+   **Settings**. It opens on Settings first (Connect has nothing to show
+   before a session exists), and switches to Connect automatically once
+   you start one.
 2. **First time only**: the panel shows a "Set up now" button instead of
    the usual controls. Click it. This is what actually installs
    [`wayvnc`](https://github.com/any1/wayvnc) via `pacman` if it isn't
@@ -55,9 +58,6 @@ below.
    needing a terminal. If that agent isn't available for some reason, it
    falls back to printing the exact command to run yourself instead of
    failing silently.
-   The panel has two tabs, **Connect** and **Settings** — it opens on
-   Settings first (Connect has nothing to show yet), and switches to
-   Connect automatically once you start a session.
 3. Click **Start** (on the Settings tab).
 
 ![Scanning the QR code to connect](docs/quick-start.gif)
