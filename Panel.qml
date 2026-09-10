@@ -16,13 +16,21 @@ Panel {
     state: "stopped", bind_ip: null, vnc_port: null, setup_url: null,
     qr_url: null, width: null, height: null, position: "auto-right",
     display_mode: "extend", mirror_source: null,
-    encryption_enabled: false, vnc_username: null, vnc_password: null,
+    encryption_enabled: true, vnc_username: null, vnc_password: null,
     client_connected: false, last_error: null,
   })
   readonly property bool daemonReachable: hostWidget ? hostWidget.daemonReachable : false
   readonly property bool running: status.state === "running"
   readonly property bool hasError: status.state === "error"
   readonly property bool mirroring: status.display_mode === "mirror"
+
+  // Two tabs instead of one long scrolling column (kdm.presets uses the
+  // same approach) -- Connect has nothing useful to show before a session
+  // exists, so a fresh panel opens on Settings; starting a session jumps
+  // to Connect automatically since that is the reason someone just clicked
+  // Start. Manual tab clicks afterward are left alone.
+  property string currentTab: "settings"
+  onRunningChanged: if (running) currentTab = "connect"
 
   readonly property color foreground: root.bar ? root.bar.foreground : Color.foreground
   readonly property color background: root.bar ? root.bar.background : Color.background
@@ -105,26 +113,18 @@ Panel {
     // Anchored under the bar icon (KeyboardPanel's default), not centered
     // on the screen -- matches every other plugin's panel on this bar.
     contentWidth: popup.fittedContentWidth(Style.space(360))
+    // Confirmed live: the card correctly grows to fit either tab's full
+    // content (~530-570 units, comfortably under this 620 cap) -- the
+    // border briefly looked too short right after a fresh shell restart
+    // because content.implicitHeight settles a few seconds after first
+    // paint (Dropdown/TextField metrics), not because anything is
+    // undersized. Steady-state (any open after the first) is correct
+    // immediately.
     contentHeight: popup.fittedContentHeight(content.implicitHeight, Style.space(620))
-
-    // The panel grew past a fixed height once encryption/position/mode
-    // controls were added -- wrapped in a Flickable (touchpad-guard's own
-    // Panel.qml uses the same pattern) so content past the available
-    // screen height scrolls instead of being clipped with no way to reach
-    // it. fittedContentHeight above already caps the popup itself to the
-    // screen; this is what makes anything beyond that cap reachable.
-    Flickable {
-      id: scrollArea
-      anchors.fill: parent
-      contentWidth: width
-      contentHeight: content.implicitHeight
-      clip: true
-      boundsBehavior: Flickable.StopAtBounds
-      interactive: contentHeight > height
 
     Column {
       id: content
-      width: scrollArea.width
+      width: popup.contentWidth
       spacing: Style.spacing.lg
 
       Row {
@@ -201,15 +201,55 @@ Panel {
         }
       }
 
-      // -- QR + connection details, only meaningful once a session is running --
+      Row {
+        visible: root.daemonReachable
+        width: parent.width
+        spacing: Style.spacing.sm
+
+        Button {
+          width: (parent.width - parent.spacing) / 2
+          text: "Connect"
+          bordered: true
+          selected: root.currentTab === "connect"
+          foreground: root.foreground
+          background: root.background
+          onClicked: root.currentTab = "connect"
+        }
+
+        Button {
+          width: (parent.width - parent.spacing) / 2
+          text: "Settings"
+          bordered: true
+          selected: root.currentTab === "settings"
+          foreground: root.foreground
+          background: root.background
+          onClicked: root.currentTab = "settings"
+        }
+      }
+
+      // -- Connect tab: QR + connection details, only meaningful once a --
+      // -- session is running --
 
       Column {
-        visible: root.running
+        visible: root.daemonReachable && root.currentTab === "connect"
         width: parent.width
         spacing: Style.spacing.md
 
+        Text {
+          visible: !root.running
+          width: parent.width
+          horizontalAlignment: Text.AlignHCenter
+          text: "Click Start to get a QR code."
+          wrapMode: Text.WordWrap
+          textFormat: Text.PlainText
+          color: Qt.darker(root.foreground, 1.4)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+
         Image {
           id: qrImage
+          visible: root.running
           anchors.horizontalCenter: parent.horizontalCenter
           width: Style.space(180)
           height: Style.space(180)
@@ -217,11 +257,10 @@ Panel {
           asynchronous: true
           cache: false
           fillMode: Image.PreserveAspectFit
-          visible: status === Image.Ready
         }
 
         Text {
-          visible: qrImage.status !== Image.Ready
+          visible: root.running && qrImage.status !== Image.Ready
           width: parent.width
           horizontalAlignment: Text.AlignHCenter
           text: "Loading QR code…"
@@ -232,6 +271,7 @@ Panel {
         }
 
         Text {
+          visible: root.running
           width: parent.width
           horizontalAlignment: Text.AlignHCenter
           text: "Scan with the tablet, or open:"
@@ -242,6 +282,7 @@ Panel {
         }
 
         Text {
+          visible: root.running
           width: parent.width
           horizontalAlignment: Text.AlignHCenter
           text: root.status.setup_url || ""
@@ -253,6 +294,7 @@ Panel {
         }
 
         BorderSurface {
+          visible: root.running
           width: parent.width
           implicitHeight: connColumn.implicitHeight + Style.spacing.lg * 2
           color: Style.controlFill(false, false, root.foreground, Color.accent)
@@ -309,7 +351,7 @@ Panel {
         }
 
         Dropdown {
-          visible: !root.mirroring
+          visible: root.running && !root.mirroring
           width: parent.width
           label: "Resolution preset"
           value: root.selectedPresetId
@@ -320,171 +362,185 @@ Panel {
         }
       }
 
-      Dropdown {
+      // -- Settings tab --
+
+      Column {
+        visible: root.daemonReachable && root.currentTab === "settings"
         width: parent.width
-        label: "Display mode"
-        value: root.status.display_mode || "extend"
-        options: root.displayModeOptions
-        foreground: root.foreground
-        background: root.background
-        // A standing preference, not tied to a running session: persists
-        // on the daemon side and applies immediately if already running,
-        // or takes effect on the next Start otherwise.
-        onChanged: function(value) { hostWidget.setDisplayMode(value) }
-      }
+        spacing: Style.spacing.lg
 
-      // Position and per-tablet resolution both mean nothing while
-      // duplicating another screen -- the mirrored output takes that
-      // screen's own position and resolution, not a chosen one.
-      Dropdown {
-        visible: !root.mirroring
-        width: parent.width
-        label: "Position"
-        value: root.status.position || "auto-right"
-        options: root.positionOptions
-        foreground: root.foreground
-        background: root.background
-        onChanged: function(value) { hostWidget.setPosition(value) }
-      }
+        Dropdown {
+          width: parent.width
+          label: "Display mode"
+          value: root.status.display_mode || "extend"
+          options: root.displayModeOptions
+          foreground: root.foreground
+          background: root.background
+          // A standing preference, not tied to a running session: persists
+          // on the daemon side and applies immediately if already running,
+          // or takes effect on the next Start otherwise.
+          onChanged: function(value) { hostWidget.setDisplayMode(value) }
+        }
 
-      Toggle {
-        width: parent.width
-        label: "Secure connection (encrypted, password-protected)"
-        checked: root.status.encryption_enabled === true
-        foreground: root.foreground
-        accent: Color.accent
-        onClicked: hostWidget.setEncryption(!checked)
-      }
+        // Position and per-tablet resolution both mean nothing while
+        // duplicating another screen -- the mirrored output takes that
+        // screen's own position and resolution, not a chosen one.
+        Dropdown {
+          visible: !root.mirroring
+          width: parent.width
+          label: "Position"
+          value: root.status.position || "auto-right"
+          options: root.positionOptions
+          foreground: root.foreground
+          background: root.background
+          onChanged: function(value) { hostWidget.setPosition(value) }
+        }
 
-      BorderSurface {
-        visible: root.status.encryption_enabled === true
-        width: parent.width
-        implicitHeight: passwordColumn.implicitHeight + Style.spacing.lg * 2
-        color: Style.controlFill(false, false, root.foreground, Color.accent)
-        borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
-        radius: Style.cornerRadius
+        Text {
+          // Not a toggle: a marketplace security review found the earlier
+          // opt-in design exposed an unauthenticated remote desktop to the
+          // whole LAN by default, not just the intended tablet. There is
+          // no way to turn this off.
+          width: parent.width
+          text: "Every session is encrypted (TLS) and password-protected."
+          wrapMode: Text.WordWrap
+          textFormat: Text.PlainText
+          color: Qt.darker(root.foreground, 1.4)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
 
-        Column {
-          id: passwordColumn
-          anchors.left: parent.left
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          anchors.margins: Style.spacing.lg
-          spacing: Style.spacing.sm
+        BorderSurface {
+          visible: !!root.status.vnc_password
+          width: parent.width
+          implicitHeight: passwordColumn.implicitHeight + Style.spacing.lg * 2
+          color: Style.controlFill(false, false, root.foreground, Color.accent)
+          borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
+          radius: Style.cornerRadius
 
-          Text {
-            width: parent.width
-            text: "VNC username / password (enter these on the tablet)"
-            wrapMode: Text.WordWrap
-            textFormat: Text.PlainText
-            color: Qt.darker(root.foreground, 1.4)
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-          }
-
-          Text {
-            text: root.status.vnc_username || ""
-            textFormat: Text.PlainText
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-          }
-
-          Row {
-            width: parent.width
-            spacing: Style.spacing.md
-
-            TextField {
-              id: customUsernameField
-              width: parent.width - setUsernameButton.width - parent.spacing
-              placeholderText: "Or choose your own username…"
-              foreground: root.foreground
-              accent: Color.accent
-              onAccepted: setUsernameButton.clicked()
-            }
-
-            Button {
-              id: setUsernameButton
-              text: "Set"
-              bordered: true
-              enabled: customUsernameField.text.length > 0
-              foreground: root.foreground
-              background: root.background
-              onClicked: {
-                hostWidget.setUsername(customUsernameField.text)
-                customUsernameField.text = ""
-              }
-            }
-          }
-
-          Row {
-            width: parent.width
-            spacing: Style.spacing.md
+          Column {
+            id: passwordColumn
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.margins: Style.spacing.lg
+            spacing: Style.spacing.sm
 
             Text {
-              // Reserves space for the button explicitly (a plain Row
-              // does not shrink children to fit) and wraps rather than
-              // eliding -- unlike a label, truncating characters out of a
-              // password shown for the user to copy would be misleading.
-              width: parent.width - regenerateButton.width - parent.spacing
-              text: root.status.vnc_password || ""
-              wrapMode: Text.WrapAnywhere
+              width: parent.width
+              text: "VNC username / password (enter these on the tablet)"
+              wrapMode: Text.WordWrap
               textFormat: Text.PlainText
-              color: root.foreground
+              color: Qt.darker(root.foreground, 1.4)
               font.family: root.fontFamily
-              font.pixelSize: Style.font.heading
+              font.pixelSize: Style.font.caption
               font.bold: true
             }
 
-            Button {
-              id: regenerateButton
-              text: "Regenerate"
-              iconText: "󰑐"
-              bordered: true
-              foreground: root.foreground
-              background: root.background
-              onClicked: hostWidget.regeneratePassword()
-            }
-          }
-
-          Row {
-            width: parent.width
-            spacing: Style.spacing.md
-
-            TextField {
-              id: customPasswordField
-              width: parent.width - setPasswordButton.width - parent.spacing
-              password: true
-              placeholderText: "Or choose your own password…"
-              foreground: root.foreground
-              accent: Color.accent
-              onAccepted: setPasswordButton.clicked()
+            Text {
+              text: root.status.vnc_username || ""
+              textFormat: Text.PlainText
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
             }
 
-            Button {
-              id: setPasswordButton
-              text: "Set"
-              bordered: true
-              enabled: customPasswordField.text.length >= 4
-              foreground: root.foreground
-              background: root.background
-              onClicked: {
-                hostWidget.setPassword(customPasswordField.text)
-                customPasswordField.text = ""
+            Row {
+              width: parent.width
+              spacing: Style.spacing.md
+
+              TextField {
+                id: customUsernameField
+                width: parent.width - setUsernameButton.width - parent.spacing
+                placeholderText: "Or choose your own username…"
+                foreground: root.foreground
+                accent: Color.accent
+                onAccepted: setUsernameButton.clicked()
+              }
+
+              Button {
+                id: setUsernameButton
+                text: "Set"
+                bordered: true
+                enabled: customUsernameField.text.length > 0
+                foreground: root.foreground
+                background: root.background
+                onClicked: {
+                  hostWidget.setUsername(customUsernameField.text)
+                  customUsernameField.text = ""
+                }
               }
             }
-          }
 
-          Text {
-            width: parent.width
-            text: "The tablet's browser also shows the username/password on the setup page. " +
-              "Also shown here since you may already be past that step."
-            wrapMode: Text.WordWrap
-            textFormat: Text.PlainText
-            color: Qt.darker(root.foreground, 1.5)
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
+            Row {
+              width: parent.width
+              spacing: Style.spacing.md
+
+              Text {
+                // Reserves space for the button explicitly (a plain Row
+                // does not shrink children to fit) and wraps rather than
+                // eliding -- unlike a label, truncating characters out of
+                // a password shown for the user to copy would be
+                // misleading.
+                width: parent.width - regenerateButton.width - parent.spacing
+                text: root.status.vnc_password || ""
+                wrapMode: Text.WrapAnywhere
+                textFormat: Text.PlainText
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.heading
+                font.bold: true
+              }
+
+              Button {
+                id: regenerateButton
+                text: "Regenerate"
+                iconText: "󰑐"
+                bordered: true
+                foreground: root.foreground
+                background: root.background
+                onClicked: hostWidget.regeneratePassword()
+              }
+            }
+
+            Row {
+              width: parent.width
+              spacing: Style.spacing.md
+
+              TextField {
+                id: customPasswordField
+                width: parent.width - setPasswordButton.width - parent.spacing
+                password: true
+                placeholderText: "Or choose your own password…"
+                foreground: root.foreground
+                accent: Color.accent
+                onAccepted: setPasswordButton.clicked()
+              }
+
+              Button {
+                id: setPasswordButton
+                text: "Set"
+                bordered: true
+                enabled: customPasswordField.text.length >= 4
+                foreground: root.foreground
+                background: root.background
+                onClicked: {
+                  hostWidget.setPassword(customPasswordField.text)
+                  customPasswordField.text = ""
+                }
+              }
+            }
+
+            Text {
+              width: parent.width
+              text: "The tablet's browser also shows the username/password on the setup page. " +
+                "Also shown here since you may already be past that step."
+              wrapMode: Text.WordWrap
+              textFormat: Text.PlainText
+              color: Qt.darker(root.foreground, 1.5)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
           }
         }
       }
@@ -498,7 +554,6 @@ Panel {
         background: root.background
         onClicked: root.running ? hostWidget.stop() : hostWidget.start()
       }
-    }
     }
   }
 }
