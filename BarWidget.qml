@@ -276,7 +276,12 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "\u{f0379}" // "monitor" glyph -- confirmed codepoint, same one omarchy.monitor's Display panel uses
+    // "md-qrcode" -- confirmed codepoint via nerd-fonts' own glyphnames.json
+    // and rendered live to check. Previously reused omarchy.monitor's own
+    // "monitor" glyph (f0379), which made this look like the native
+    // Display panel at a glance; a QR code reads as this plugin's own
+    // thing instead.
+    text: "\u{f0432}"
     active: root.running
     useActiveColor: true
     tooltipText: root._tooltipText()
