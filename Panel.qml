@@ -113,18 +113,41 @@ Panel {
     // Anchored under the bar icon (KeyboardPanel's default), not centered
     // on the screen -- matches every other plugin's panel on this bar.
     contentWidth: popup.fittedContentWidth(Style.space(360))
-    // Confirmed live: the card correctly grows to fit either tab's full
-    // content (~530-570 units, comfortably under this 620 cap) -- the
-    // border briefly looked too short right after a fresh shell restart
-    // because content.implicitHeight settles a few seconds after first
-    // paint (Dropdown/TextField metrics), not because anything is
-    // undersized. Steady-state (any open after the first) is correct
-    // immediately.
+    // Comfortably fits either tab's full content (~530-570 units) once
+    // status has actually arrived over the socket. Right after a fresh
+    // reconnect (shell restart, or the daemon itself restarting) the very
+    // first render happens before that first status arrives, so
+    // root.status.vnc_password is still null and the credentials block
+    // below is briefly not there at all -- shorter content, so a smaller
+    // card. The instant status arrives, that block appears and the card
+    // grows, but the border's own resize and the newly-visible content
+    // are not guaranteed to land in the same composited frame, which is
+    // what actually produced the "content outside the border" look seen
+    // live -- not a one-time settling delay, as a previous version of
+    // this comment claimed. `clip: true` below is what actually
+    // guarantees containment regardless of that timing.
     contentHeight: popup.fittedContentHeight(content.implicitHeight, Style.space(620))
+    // KeyboardPanel exposes a combined verticalContentInset (used above)
+    // but no horizontal equivalent -- computed the same way it does,
+    // from its own public padding/borderSpec. Missing this is exactly
+    // what let content render popup.contentWidth wide (the *card's* full
+    // width) inside contentHolder, which is actually narrower than that
+    // by this same inset on each side -- confirmed live as the "out of
+    // bounds on the right" look, distinct from the height issue below.
+    readonly property real horizontalContentInset:
+      popup.padding * 2 + Border.left(popup.borderSpec) + Border.right(popup.borderSpec)
 
     Column {
       id: content
-      width: popup.contentWidth
+      // Explicit height (not just clip: true, which does nothing for a
+      // Column sized by its own implicitHeight) so content can never
+      // render outside the card regardless of load-order timing --
+      // verticalContentInset is KeyboardPanel's own padding/border budget
+      // already reserved by contentHolder, the actual parent this ends up
+      // inside via the `default property alias contentItem` mechanism.
+      clip: true
+      width: popup.contentWidth - popup.horizontalContentInset
+      height: popup.contentHeight - popup.verticalContentInset
       spacing: Style.spacing.lg
 
       Row {
